@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/select";
 import { Upload, FileText, Download, Trash2, Send, Search, Eye, X } from "lucide-react";
 
-const MAX_FILE_SIZE = 250 * 1024 * 1024;
+const MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024;
 const RESUMABLE_THRESHOLD = 6 * 1024 * 1024;
 
 async function uploadResumable(file: File, path: string, onProgress: (pct: number) => void): Promise<void> {
@@ -136,7 +136,8 @@ export function GestionDocumentos({ mode }: { mode: "jefe" | "abogado" }) {
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!file) { toast({ title: "Selecciona un archivo", variant: "destructive" }); return; }
-    if (file.size > MAX_FILE_SIZE) { toast({ title: "Archivo muy grande", description: "Máximo 250 MB", variant: "destructive" }); return; }
+    if (file.size > MAX_FILE_SIZE) { toast({ title: "Archivo muy grande", description: "Máximo 2 GB", variant: "destructive" }); return; }
+    if (mode === "jefe" && !recipient) { toast({ title: "Selecciona un abogado", description: "Debes elegir a quién enviarle el documento.", variant: "destructive" }); return; }
     if (!user) return;
 
     setUploading(true);
@@ -268,11 +269,31 @@ export function GestionDocumentos({ mode }: { mode: "jefe" | "abogado" }) {
               <>
                 <p className="font-body text-sm font-semibold text-foreground">{file.name}</p>
                 <p className="font-body text-xs text-muted-foreground">{formatBytes(file.size)} · Clic para cambiar</p>
+                {/* Barra de capacidad del archivo seleccionado */}
+                <div className="w-full max-w-xs mt-2">
+                  <div className="flex justify-between text-[10px] font-body text-muted-foreground mb-1">
+                    <span>{formatBytes(file.size)}</span>
+                    <span>2 GB máx</span>
+                  </div>
+                  <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all ${file.size / (2 * 1024 * 1024 * 1024) > 0.9 ? "bg-destructive" : file.size / (2 * 1024 * 1024 * 1024) > 0.6 ? "bg-amber-500" : "bg-accent"}`}
+                      style={{ width: `${Math.min(100, (file.size / (2 * 1024 * 1024 * 1024)) * 100)}%` }}
+                    />
+                  </div>
+                </div>
               </>
             ) : (
               <>
                 <p className="font-body text-sm font-semibold text-foreground">Arrastra o selecciona un archivo</p>
-                <p className="font-body text-xs text-muted-foreground">PDF, DOCX, JPG · máx 250 MB</p>
+                <p className="font-body text-xs text-muted-foreground">PDF, DOCX, JPG, MP4 · máx 2 GB</p>
+                <div className="w-full max-w-xs mt-2">
+                  <div className="flex justify-between text-[10px] font-body text-muted-foreground mb-1">
+                    <span>0 B</span>
+                    <span>2 GB disponibles</span>
+                  </div>
+                  <div className="w-full h-1.5 bg-muted rounded-full" />
+                </div>
               </>
             )}
             <input ref={fileRef} type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" onChange={e => setFile(e.target.files?.[0] ?? null)} className="hidden" />
@@ -290,13 +311,32 @@ export function GestionDocumentos({ mode }: { mode: "jefe" | "abogado" }) {
           <div className="grid sm:grid-cols-2 gap-4">
             {mode === "jefe" && (
               <div className="space-y-1.5">
-                <Label className="font-body text-sm font-semibold text-foreground">Enviar a abogado</Label>
-                <Select value={recipient} onValueChange={setRecipient}>
-                  <SelectTrigger><SelectValue placeholder="Seleccionar abogado" /></SelectTrigger>
-                  <SelectContent>
-                    {abogados.map(ab => <SelectItem key={ab.id} value={ab.id}>{ab.full_name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                <Label className="font-body text-sm font-semibold text-foreground">
+                  Enviar a abogado <span className="text-destructive">*</span>
+                </Label>
+                {abogados.length === 0 ? (
+                  <div className="border border-destructive/30 bg-destructive/5 rounded-lg p-3">
+                    <p className="font-body text-xs text-destructive">⚠ No hay abogados registrados. Crea uno en Gestión de Usuarios.</p>
+                  </div>
+                ) : (
+                  <>
+                    <Select value={recipient} onValueChange={setRecipient}>
+                      <SelectTrigger className={!recipient ? "border-amber-400" : "border-accent"}>
+                        <SelectValue placeholder="Seleccionar abogado" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {abogados.map(ab => (
+                          <SelectItem key={ab.id} value={ab.id}>
+                            {ab.full_name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {!recipient && (
+                      <p className="font-body text-[11px] text-amber-600">⚠ Debes seleccionar un abogado para enviar el documento.</p>
+                    )}
+                  </>
+                )}
               </div>
             )}
             <div className="space-y-1.5">

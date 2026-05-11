@@ -27,9 +27,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setUser(newSession?.user ?? null);
       if (newSession?.user) {
         // Defer role fetch to avoid deadlock
-        setTimeout(() => fetchRole(newSession.user.id), 0);
+        setTimeout(() => fetchRole(newSession.user.id).finally(() => setLoading(false)), 0);
       } else {
         setRole(null);
+        setLoading(false);
       }
     });
 

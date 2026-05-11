@@ -1,5 +1,5 @@
 import { Scale, Shield, BarChart3, Instagram, Facebook, MessageCircle } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "@tanstack/react-router";
 
 const socialLinks = [
   { icon: Instagram, label: "Instagram", href: "https://www.instagram.com/jurovalegal?igsh=MXA5eXhnN2ZhbWtuYw==" },
@@ -67,16 +67,16 @@ const HeroSection = () => {
 
           <div className="animate-fade-up-delay-2 flex flex-col sm:flex-row gap-4 justify-center">
             <button
-              onClick={() => navigate("/auth")}
+              onClick={() => navigate({ to: "/auth" })}
               className="gradient-gold text-primary font-body font-semibold px-8 py-4 rounded-lg shadow-gold hover:opacity-90 transition-opacity"
             >
               Acceder al Sistema
             </button>
             <button
-              onClick={() => { sessionStorage.setItem("auth_rol", "cliente"); navigate("/auth"); }}
+              onClick={() => navigate({ to: "/consultar-caso" })}
               className="border border-accent/30 text-primary-foreground font-body font-medium px-8 py-4 rounded-lg hover:bg-accent/5 transition-colors"
             >
-              Portal del Cliente
+              Consultar mi Caso
             </button>
           </div>
 
