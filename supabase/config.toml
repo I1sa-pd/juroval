@@ -1,0 +1,4 @@
+project_id = "znvabwnbnfaotclkzael"
+
+[functions.create-abogado]
+verify_jwt = true

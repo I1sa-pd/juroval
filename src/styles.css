@@ -1,0 +1,153 @@
+@import url('https://fonts.googleapis.com/css2?family=Merriweather:ital,wght@0,300;0,400;0,700;0,900;1,400&family=Lato:wght@300;400;700;900&display=swap');
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-ring-offset-background: hsl(var(--background));
+
+  --color-navy: hsl(var(--navy));
+  --color-navy-deep: hsl(var(--navy-deep));
+  --color-navy-light: hsl(var(--navy-light));
+  --color-gold: hsl(var(--gold));
+  --color-gold-light: hsl(var(--gold-light));
+  --color-gold-muted: hsl(var(--gold-muted));
+  --color-beige: hsl(var(--beige));
+  --color-success: hsl(var(--success));
+  --color-warning: hsl(var(--warning));
+  --color-info: hsl(var(--info));
+
+  --color-sidebar: hsl(var(--sidebar-background));
+  --color-sidebar-foreground: hsl(var(--sidebar-foreground));
+  --color-sidebar-primary: hsl(var(--sidebar-primary));
+  --color-sidebar-primary-foreground: hsl(var(--sidebar-primary-foreground));
+  --color-sidebar-accent: hsl(var(--sidebar-accent));
+  --color-sidebar-accent-foreground: hsl(var(--sidebar-accent-foreground));
+  --color-sidebar-border: hsl(var(--sidebar-border));
+  --color-sidebar-ring: hsl(var(--sidebar-ring));
+
+  --font-display: 'Merriweather', Georgia, serif;
+  --font-body: 'Lato', system-ui, sans-serif;
+}
+
+
+
+:root {
+  /* Jurova Brand — Navy #1E2E4F + Dorado #C6A34E + Beige #DED3BC + Blanco */
+  --background: 0 0% 100%;
+  --foreground: 222 44% 21%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 44% 21%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 44% 21%;
+  --primary: 222 44% 21%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 39 35% 80%;
+  --secondary-foreground: 222 44% 21%;
+  --muted: 39 35% 92%;
+  --muted-foreground: 222 20% 38%;
+  --accent: 41 51% 54%;
+  --accent-foreground: 222 44% 21%;
+  --destructive: 0 72% 45%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 39 25% 84%;
+  --input: 39 25% 84%;
+  --ring: 41 51% 54%;
+  --radius: 0.5rem;
+
+  --sidebar-background: 222 44% 21%;
+  --sidebar-foreground: 39 35% 92%;
+  --sidebar-primary: 41 51% 54%;
+  --sidebar-primary-foreground: 222 44% 21%;
+  --sidebar-accent: 222 38% 28%;
+  --sidebar-accent-foreground: 39 35% 92%;
+  --sidebar-border: 222 38% 30%;
+  --sidebar-ring: 41 51% 54%;
+
+  --navy-deep: 222 50% 14%;
+  --navy: 222 44% 21%;
+  --navy-light: 222 32% 32%;
+  --gold: 41 51% 54%;
+  --gold-light: 41 60% 65%;
+  --gold-muted: 39 35% 80%;
+  --beige: 39 35% 80%;
+  --success: 152 40% 38%;
+  --warning: 38 75% 50%;
+  --info: 222 50% 45%;
+}
+
+@layer base {
+  * {
+    border-color: hsl(var(--border));
+  }
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-family: var(--font-body);
+  }
+  h1, h2, h3, h4 {
+    font-family: var(--font-display);
+  }
+}
+
+@layer utilities {
+  .gradient-navy {
+    background: linear-gradient(135deg, hsl(var(--navy-deep)), hsl(var(--navy)), hsl(var(--navy-light)));
+  }
+  .gradient-gold {
+    background: linear-gradient(135deg, hsl(var(--gold)), hsl(var(--gold-light)));
+  }
+  .text-gold-gradient {
+    background: linear-gradient(135deg, hsl(var(--gold)), hsl(var(--gold-light)));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .shadow-luxury {
+    box-shadow: 0 4px 24px -4px hsl(var(--navy) / 0.12), 0 1px 4px hsl(var(--navy) / 0.06);
+  }
+  .shadow-gold {
+    box-shadow: 0 4px 20px -4px hsl(var(--gold) / 0.3);
+  }
+  .animate-fade-up { animation: fadeUp 0.6s ease-out both; }
+  .animate-fade-up-delay { animation: fadeUp 0.6s ease-out 0.15s both; }
+  .animate-fade-up-delay-2 { animation: fadeUp 0.6s ease-out 0.3s both; }
+  .animate-count-up { animation: countPulse 2s ease-out both; }
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes countPulse {
+  0% { transform: scale(0.8); opacity: 0; }
+  60% { transform: scale(1.05); }
+  100% { transform: scale(1); opacity: 1; }
+}
