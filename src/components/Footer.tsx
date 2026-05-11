@@ -1,10 +1,9 @@
-import { Scale, Instagram, Facebook, Linkedin, MessageCircle } from "lucide-react";
+import { Scale, Instagram, Facebook, MessageCircle } from "lucide-react";
 
 const socialLinks = [
-  { icon: Instagram, label: "Instagram", href: "https://instagram.com/jurovalegal" },
-  { icon: Facebook, label: "Facebook", href: "https://facebook.com/jurovalegal" },
-  { icon: Linkedin, label: "LinkedIn", href: "https://linkedin.com/company/jurova-legal-group" },
-  { icon: MessageCircle, label: "WhatsApp", href: "https://wa.me/573001234567" },
+  { icon: Instagram, label: "Instagram", href: "https://www.instagram.com/jurovalegal?igsh=MXA5eXhnN2ZhbWtuYw==" },
+  { icon: Facebook, label: "Facebook", href: "https://www.facebook.com/share/1BCGEDoTgR/" },
+  { icon: MessageCircle, label: "WhatsApp", href: "https://wa.me/573134439740" },
 ];
 
 const Footer = () => (

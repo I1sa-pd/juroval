@@ -179,6 +179,42 @@ export type Database = {
           },
         ]
       }
+      contact_requests: {
+        Row: {
+          id: string
+          nombre: string
+          email: string
+          telefono: string
+          motivo: string
+          mensaje: string | null
+          leido: boolean
+          atendido: boolean
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          nombre: string
+          email: string
+          telefono: string
+          motivo: string
+          mensaje?: string | null
+          leido?: boolean
+          atendido?: boolean
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          nombre?: string
+          email?: string
+          telefono?: string
+          motivo?: string
+          mensaje?: string | null
+          leido?: boolean
+          atendido?: boolean
+          created_at?: string
+        }
+        Relationships: []
+      }
       cases: {
         Row: {
           abogado_id: string | null

@@ -4,15 +4,63 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 
 const ConsultarCaso = () => {
   const navigate = useNavigate();
+  const { toast } = useToast();
   const [cedula, setCedula] = useState("");
   const [nombre, setNombre] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const handleConsultar = (e: React.FormEvent) => {
+  const handleConsultar = async (e: React.FormEvent) => {
     e.preventDefault();
-    navigate("/mi-caso");
+    if (!cedula.trim() || !nombre.trim()) return;
+    setLoading(true);
+
+    // Buscar el perfil por cédula y nombre
+    const { data: perfiles } = await supabase
+      .from("profiles")
+      .select("id, full_name, cedula")
+      .ilike("cedula", cedula.trim())
+      .ilike("full_name", `%${nombre.trim()}%`)
+      .limit(1);
+
+    if (!perfiles || perfiles.length === 0) {
+      toast({
+        title: "No encontrado",
+        description: "No encontramos un caso con esa cédula y nombre. Verifica los datos o contacta al bufete.",
+        variant: "destructive",
+      });
+      setLoading(false);
+      return;
+    }
+
+    // Verificar que tiene casos activos
+    const { data: casos } = await supabase
+      .from("cases")
+      .select("id")
+      .eq("cliente_id", perfiles[0].id)
+      .limit(1);
+
+    if (!casos || casos.length === 0) {
+      toast({
+        title: "Sin casos activos",
+        description: "Tu perfil existe pero no tiene casos registrados. Contacta al bufete.",
+        variant: "destructive",
+      });
+      setLoading(false);
+      return;
+    }
+
+    // Todo OK — redirigir al login de cliente
+    toast({
+      title: "Caso encontrado",
+      description: "Inicia sesión para ver el estado de tu caso.",
+    });
+    navigate("/auth");
+    setLoading(false);
   };
 
   return (
@@ -68,9 +116,9 @@ const ConsultarCaso = () => {
               />
             </div>
 
-            <Button type="submit" className="w-full gradient-gold text-primary font-body font-semibold h-11 rounded-lg shadow-gold hover:opacity-90 transition-opacity border-0">
+            <Button type="submit" disabled={loading} className="w-full gradient-gold text-primary font-body font-semibold h-11 rounded-lg shadow-gold hover:opacity-90 transition-opacity border-0">
               <Search className="w-4 h-4 mr-2" />
-              Consultar mi Caso
+              {loading ? "Consultando…" : "Consultar mi Caso"}
             </Button>
           </form>
 

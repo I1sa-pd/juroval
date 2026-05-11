@@ -1,11 +1,10 @@
-import { Scale, Shield, BarChart3, Instagram, Facebook, Linkedin, MessageCircle } from "lucide-react";
+import { Scale, Shield, BarChart3, Instagram, Facebook, MessageCircle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 const socialLinks = [
-  { icon: Instagram, label: "Instagram", href: "https://instagram.com/jurovalegal" },
-  { icon: Facebook, label: "Facebook", href: "https://facebook.com/jurovalegal" },
-  { icon: Linkedin, label: "LinkedIn", href: "https://linkedin.com/company/jurova-legal-group" },
-  { icon: MessageCircle, label: "WhatsApp", href: "https://wa.me/573001234567" },
+  { icon: Instagram, label: "Instagram", href: "https://www.instagram.com/jurovalegal?igsh=MXA5eXhnN2ZhbWtuYw==" },
+  { icon: Facebook, label: "Facebook", href: "https://www.facebook.com/share/1BCGEDoTgR/" },
+  { icon: MessageCircle, label: "WhatsApp", href: "https://wa.me/573134439740" },
 ];
 
 const HeroSection = () => {
@@ -14,7 +13,7 @@ const HeroSection = () => {
   return (
     <section id="inicio" className="gradient-navy relative overflow-hidden min-h-[90vh] flex items-center pt-20">
       {/* Top bar with social links */}
-      <div className="absolute top-16 left-0 w-full z-20">
+      <div className="hidden sm:block absolute top-16 left-0 w-full z-20">
         <div className="container mx-auto px-6 py-3 flex justify-end">
           <div className="flex items-center gap-3">
             {socialLinks.map((social) => (
@@ -68,16 +67,16 @@ const HeroSection = () => {
 
           <div className="animate-fade-up-delay-2 flex flex-col sm:flex-row gap-4 justify-center">
             <button
-              onClick={() => navigate("/login")}
+              onClick={() => navigate("/auth")}
               className="gradient-gold text-primary font-body font-semibold px-8 py-4 rounded-lg shadow-gold hover:opacity-90 transition-opacity"
             >
               Acceder al Sistema
             </button>
             <button
-              onClick={() => navigate("/consultar-caso")}
+              onClick={() => { sessionStorage.setItem("auth_rol", "cliente"); navigate("/auth"); }}
               className="border border-accent/30 text-primary-foreground font-body font-medium px-8 py-4 rounded-lg hover:bg-accent/5 transition-colors"
             >
-              Consultar mi Caso
+              Portal del Cliente
             </button>
           </div>
 

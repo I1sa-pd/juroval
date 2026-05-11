@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Scale, ArrowLeft, Briefcase, ShieldCheck, Users } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "@tanstack/react-router";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -48,7 +48,14 @@ const Auth = () => {
   const { toast } = useToast();
   const { user, role, loading: authLoading } = useAuth();
   const [loading, setLoading] = useState(false);
-  const [selectedRole, setSelectedRole] = useState<RoleChoice>("jefe");
+  const [selectedRole, setSelectedRole] = useState<RoleChoice>(() => {
+    try {
+      const r = sessionStorage.getItem("auth_rol");
+      sessionStorage.removeItem("auth_rol");
+      if (r === "cliente" || r === "abogado" || r === "jefe") return r as RoleChoice;
+    } catch {}
+    return "jefe";
+  });
   const [loginData, setLoginData] = useState({ email: "", password: "" });
 
   // Redirige si ya está logueado
