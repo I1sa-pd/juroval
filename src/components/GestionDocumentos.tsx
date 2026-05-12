@@ -192,6 +192,21 @@ export function GestionDocumentos({ mode }: { mode: "jefe" | "abogado" }) {
         });
       }
     }
+   // Si es abogado subiendo, notificar al director
+    if (mode === "abogado") {
+      const { data: jefeRoles } = await supabase.from("user_roles").select("user_id").eq("role", "jefe");
+      const jefeId = jefeRoles?.[0]?.user_id;
+      if (jefeId) {
+        const caso = casos.find(c => c.id === caseId);
+        await supabase.from("notificaciones").insert({
+          user_id: jefeId,
+          case_id: caseId || null,
+          tipo: "documento_abogado",
+          titulo: "Nuevo documento subido por abogado",
+          mensaje: `Se subió el documento "${file.name}"${caso ? ` al caso #${caso.radicado}` : ""}${description ? `. Nota: ${description}` : ""}.`,
+        });
+      }
+    }
     toast({ title: "Documento enviado", description: `${file.name} fue enviado correctamente.` });
     setFile(null); setDescription(""); setRecipient(""); setCaseId(""); setSharedWithClient(false);
     if (fileRef.current) fileRef.current.value = "";

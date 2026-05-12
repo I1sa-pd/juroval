@@ -35,9 +35,8 @@ const ContactSection = () => {
       mensaje: form.mensaje.trim() || null,
     });
 
-    setLoading(false);
-
     if (error) {
+      setLoading(false);
       toast({
         title: "Error al enviar",
         description: "No se pudo guardar tu solicitud. Intenta de nuevo.",
@@ -46,9 +45,11 @@ const ContactSection = () => {
       return;
     }
 
-    // Notificar al director sobre la nueva solicitud
-    const { data: jefeRoles } = await supabase.from("user_roles").select("user_id").eq("role", "jefe");
-    const jefeId = jefeRoles?.[0]?.user_id;
+    const jefeResult = await supabase
+      .from("user_roles")
+      .select("user_id")
+      .eq("role", "jefe");
+    const jefeId = jefeResult.data?.[0]?.user_id;
     if (jefeId) {
       await supabase.from("notificaciones").insert({
         user_id: jefeId,
@@ -58,6 +59,8 @@ const ContactSection = () => {
         mensaje: `${form.nombre.trim()} (${form.telefono.trim()}) solicitó contacto por "${form.motivo}"${form.mensaje.trim() ? `: ${form.mensaje.trim().slice(0, 100)}` : ""}.`,
       });
     }
+
+    setLoading(false);
     setEnviado(true);
     setForm({ nombre: "", email: "", motivo: "", telefono: "", mensaje: "" });
     setTimeout(() => setEnviado(false), 6000);

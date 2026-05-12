@@ -2899,14 +2899,11 @@ const SeccionNotificacionesJefe = ({ setActiveSection }: { setActiveSection: (s:
     return () => { supabase.removeChannel(ch); };
   }, [user?.id]);
 
-  const onClick = async (n: typeof notifs[number]) => {
+ const onClick = async (n: typeof notifs[number]) => {
     if (!n.leida) await supabase.from("notificaciones").update({ leida: true }).eq("id", n.id);
     if (n.tipo === "solicitud_contacto") setActiveSection("solicitudes");
     else if (n.tipo === "documento_recibido" || n.tipo === "documento_abogado") setActiveSection("documentos");
-    else if (n.tipo === "comentario" || n.tipo === "comentario_abogado") setActiveSection("comentarios");
-    else if (n.tipo === "audiencia_creada") setActiveSection("calendario");
-    else if (n.tipo === "caso_devuelto_log") setActiveSection("revision");
-    else if (n.case_id || n.tipo.startsWith("caso") || n.tipo === "actuacion_creada" || n.tipo === "termino_vencido") setActiveSection("revision");
+    else if (n.case_id || n.tipo.startsWith("caso") || n.tipo === "actuacion_creada" || n.tipo === "audiencia_creada" || n.tipo === "comentario_abogado") setActiveSection("revision");
     load();
   };
 
@@ -2943,35 +2940,35 @@ const SeccionNotificacionesJefe = ({ setActiveSection }: { setActiveSection: (s:
       ) : (
         <div className="grid gap-3">
           {notifs.map((n) => {
-            const iconMap: Record<string, { icon: any; color: string }> = {
-              comentario_abogado: { icon: MessageSquare, color: "bg-indigo-100 text-indigo-600" },
-              documento_abogado:  { icon: FileText,      color: "bg-emerald-100 text-emerald-600" },
-              documento_recibido: { icon: FileText,      color: "bg-sky-100 text-sky-600" },
-              solicitud_contacto: { icon: Phone,         color: "bg-amber-100 text-amber-600" },
-              termino_vencido:    { icon: Clock,         color: "bg-rose-100 text-rose-600" },
-              comentario:         { icon: MessageSquare, color: "bg-violet-100 text-violet-600" },
-              recordatorio_audiencia:   { icon: CalendarDays, color: "bg-blue-100 text-blue-600" },
-              recordatorio_vencimiento: { icon: Clock,        color: "bg-rose-100 text-rose-600" },
-              recordatorio_actuacion:   { icon: AlertTriangle, color: "bg-amber-100 text-amber-600" },
-            };
-            const meta = iconMap[n.tipo] ?? { icon: Bell, color: "bg-muted text-muted-foreground" };
-            const Icon = meta.icon;
-            return (
-              <button key={n.id} onClick={() => onClick(n)} className={`text-left bg-card rounded-xl border p-4 flex items-center gap-4 hover:border-accent/30 transition-all ${n.leida ? "border-border opacity-60" : "border-accent/30 shadow-sm"}`}>
-                <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${meta.color}`}>
-                  <Icon className="w-4 h-4" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <p className="font-body text-sm font-semibold text-foreground">{n.titulo}</p>
-                    {!n.leida && <span className="w-2 h-2 rounded-full bg-accent flex-shrink-0" />}
-                  </div>
-                  <p className="font-body text-xs text-muted-foreground mt-0.5 line-clamp-2">{n.mensaje}</p>
-                  <p className="font-body text-[10px] text-muted-foreground/60 mt-1">{new Date(n.created_at).toLocaleString("es-CO", { dateStyle: "medium", timeStyle: "short" })}</p>
-                </div>
-                <button onClick={(e) => eliminar(e, n.id)} className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-destructive transition-colors flex-shrink-0" title="Eliminar">
+  const iconMap: Record<string, { icon: any; color: string }> = {
+    comentario_abogado:       { icon: MessageSquare,  color: "bg-indigo-100 text-indigo-600" },
+    documento_abogado:        { icon: FileText,        color: "bg-emerald-100 text-emerald-600" },
+    documento_recibido:       { icon: FileText,        color: "bg-sky-100 text-sky-600" },
+    solicitud_contacto:       { icon: Phone,           color: "bg-amber-100 text-amber-600" },
+    termino_vencido:          { icon: Clock,           color: "bg-rose-100 text-rose-600" },
+    comentario:               { icon: MessageSquare,   color: "bg-violet-100 text-violet-600" },
+    recordatorio_audiencia:   { icon: CalendarDays,    color: "bg-blue-100 text-blue-600" },
+    recordatorio_vencimiento: { icon: Clock,           color: "bg-rose-100 text-rose-600" },
+    recordatorio_actuacion:   { icon: AlertTriangle,   color: "bg-amber-100 text-amber-600" },
+  };
+  const meta = iconMap[n.tipo] ?? { icon: Bell, color: "bg-muted text-muted-foreground" };
+  const Icon = meta.icon;
+  return (
+    <button key={n.id} onClick={() => onClick(n)} className={`text-left bg-card rounded-xl border p-4 flex items-center gap-4 hover:border-accent/30 transition-all ${n.leida ? "border-border opacity-60" : "border-accent/30 shadow-sm"}`}>
+      <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${meta.color}`}>
+        <Icon className="w-4 h-4" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <p className="font-body text-sm font-semibold text-foreground">{n.titulo}</p>
+          {!n.leida && <span className="w-2 h-2 rounded-full bg-accent flex-shrink-0" />}
+        </div>
+        <p className="font-body text-xs text-muted-foreground mt-0.5 line-clamp-2">{n.mensaje}</p>
+        <p className="font-body text-[10px] text-muted-foreground/60 mt-1">{new Date(n.created_at).toLocaleString("es-CO", { dateStyle: "medium", timeStyle: "short" })}</p>
+      </div>
+    <div onClick={(e) => eliminar(e as any, n.id)} className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-destructive transition-colors flex-shrink-0 cursor-pointer" title="Eliminar">
                   <X className="w-4 h-4" />
-                </button>
+                </div>
               </button>
             );
           })}

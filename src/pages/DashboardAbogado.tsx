@@ -366,7 +366,7 @@ const CaseDetail = ({ caso, actuaciones, audiencias, documentos, onBack, onChang
   const enviarComentario = async () => {
     if (!nuevoComentario.trim() || !user) return;
     setSavingCom(true);
-    const { error } = await supabase.from("case_comments").insert({
+  const { error } = await supabase.from("case_comments").insert({
       case_id: caso.id,
       author_id: user.id,
       abogado_id: user.id,
@@ -379,10 +379,10 @@ const CaseDetail = ({ caso, actuaciones, audiencias, documentos, onBack, onChang
       if (jefeId) {
         await supabase.from("notificaciones").insert({
           user_id: jefeId,
+          case_id: caso.id,
           tipo: "comentario_abogado",
           titulo: "Nuevo comentario de abogado",
-          mensaje: `El abogado dejó un comentario en el caso #${caso.radicado}: "${nuevoComentario.trim().slice(0, 80)}${nuevoComentario.length > 80 ? "…" : ""}"`,
-          case_id: caso.id,
+          mensaje: `El abogado dejó un comentario en el caso #${caso.radicado}: "${nuevoComentario.trim().slice(0, 80)}${nuevoComentario.length > 80 ? "…" : ""}"`
         });
       }
       setNuevoComentario("");
