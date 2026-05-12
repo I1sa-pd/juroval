@@ -198,6 +198,7 @@ type RevAud = { id: string; case_id: string; titulo: string; fecha_inicio: strin
 type RevDoc = { id: string; case_id: string | null; file_name: string; file_path: string; created_at: string; uploaded_by: string };
 
 const SeccionRevision = () => {
+  const { user } = useAuth();
   const { toast } = useToast();
   const [casos, setCasos] = useState<RevCaso[]>([]);
   const [acts, setActs] = useState<RevAct[]>([]);
@@ -273,6 +274,24 @@ const SeccionRevision = () => {
 ${caso.observaciones ?? ""}`.trim();
     const { error } = await supabase.from("cases").update({ etapa: "Proyección" as any, observaciones: obs }).eq("id", caso.id);
     if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
+    if (caso.abogado_id) {
+      await supabase.from("notificaciones").insert({
+        user_id: caso.abogado_id,
+        case_id: caso.id,
+        tipo: "caso_devuelto",
+        titulo: "Caso devuelto para corrección",
+        mensaje: `El director devolvió el caso #${caso.radicado} (${caso.cliente_nombre}) a Proyección. Observación: ${observacion.trim().slice(0, 120)}`,
+      });
+    }
+    if (user) {
+      await supabase.from("notificaciones").insert({
+        user_id: user.id,
+        case_id: caso.id,
+        tipo: "caso_devuelto_log",
+        titulo: `Caso #${caso.radicado} devuelto a Proyección`,
+        mensaje: `Devolviste el caso de ${caso.cliente_nombre}. Observación: "${observacion.trim().slice(0, 100)}"`,
+      });
+    }
     toast({ title: "Caso devuelto", description: "El abogado verá las correcciones." });
     setObservacion(""); setExpandedCase(null);
     load();
@@ -1795,13 +1814,14 @@ const SeccionCalendarioJefe = () => {
   const [diaSeleccionado, setDiaSeleccionado] = useState<string | null>(null);
   const [filtro, setFiltro] = useState<string>("todos");
 
-  const load = async () => {
+ const load = async () => {
     setLoading(true);
-    const [{ data: auds }, { data: acts }, { data: cases }, { data: profs }] = await Promise.all([
+    const [{ data: auds }, { data: acts }, { data: cases }, { data: profs }, { data: coms }] = await Promise.all([
       supabase.from("audiencias").select("id, case_id, titulo, fecha_inicio, modalidad, ubicacion, enlace_virtual"),
       supabase.from("actuaciones").select("id, case_id, tipo, descripcion, vence_at, cumplida").eq("cumplida", false).not("vence_at", "is", null),
       supabase.from("cases").select("id, radicado, cliente_nombre, abogado_id, fecha_vencimiento, etapa, tipo").neq("etapa", "Cerrado"),
       supabase.from("profiles").select("id, full_name"),
+      supabase.from("case_comments").select("id, case_id, author_id, texto, created_at").order("created_at", { ascending: false }).limit(50),
     ]);
 
     const pm: Record<string, string> = {};
@@ -1869,6 +1889,23 @@ const SeccionCalendarioJefe = () => {
       });
     });
 
+   // 4. Comentarios recientes de abogados
+    (coms ?? []).forEach((c: any) => {
+      const caso = casosMap[c.case_id];
+      if (!caso) return;
+      evs.push({
+        id: "com-" + c.id,
+        fecha: c.created_at.split("T")[0],
+        hora: new Date(c.created_at).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit", hour12: false }),
+        titulo: `Comentario: "${c.texto.slice(0, 60)}${c.texto.length > 60 ? "…" : ""}"`,
+        tipo: "comentario",
+        radicado: caso.radicado,
+        tipoCaso: caso.tipo,
+        cliente: caso.cliente_nombre,
+        abogado_id: c.author_id,
+      });
+    });
+
     evs.sort((a, b) => a.fecha.localeCompare(b.fecha) || a.hora.localeCompare(b.hora));
     setEventos(evs);
     setLoading(false);
@@ -1896,6 +1933,7 @@ const SeccionCalendarioJefe = () => {
     documento:   { dot: "bg-amber-500",  badge: "bg-amber-100 text-amber-700", card: "border-amber-200 bg-amber-50/60", icon: "📄", label: "Entrega de doc." },
     termino:     { dot: "bg-violet-500", badge: "bg-violet-100 text-violet-700",card: "border-violet-200 bg-violet-50/60",icon: "⚖️",label: "Término" },
     vencimiento: { dot: "bg-red-500",    badge: "bg-red-100 text-red-700",     card: "border-red-200 bg-red-50/60",     icon: "⏰", label: "Vencimiento" },
+    comentario:  { dot: "bg-violet-400", badge: "bg-violet-100 text-violet-700", card: "border-violet-200 bg-violet-50/40", icon: "💬", label: "Comentario" },
   };
 
   const EventoCard = ({ ev }: { ev: any }) => {
@@ -1979,6 +2017,7 @@ const SeccionCalendarioJefe = () => {
               { id: "documento", label: `📄 Entregas (${conteo("documento")})` },
               { id: "termino", label: `⚖️ Términos (${conteo("termino")})` },
               { id: "vencimiento", label: `⏰ Vencimientos (${conteo("vencimiento")})` },
+              { id: "comentario", label: `💬 Comentarios (${conteoComentarios})` },
             ].map(f => (
               <button key={f.id} type="button" onClick={() => { setFiltro(f.id); setDiaSeleccionado(null); }}
                 className={`font-body text-xs px-3 py-1.5 rounded-full border transition-colors ${filtro === f.id ? "border-accent bg-accent/10 text-foreground font-medium" : "border-border text-muted-foreground hover:border-accent/40"}`}>
@@ -2655,9 +2694,12 @@ const SeccionNotificacionesJefe = ({ setActiveSection }: { setActiveSection: (s:
 
   const onClick = async (n: typeof notifs[number]) => {
     if (!n.leida) await supabase.from("notificaciones").update({ leida: true }).eq("id", n.id);
-    if (n.tipo === "solicitud_contacto") setActiveSection("solicitudes");
+   if (n.tipo === "solicitud_contacto") setActiveSection("solicitudes");
     else if (n.tipo === "documento_recibido" || n.tipo === "documento_abogado") setActiveSection("documentos");
-    else if (n.case_id || n.tipo.startsWith("caso") || n.tipo === "actuacion_creada" || n.tipo === "audiencia_creada" || n.tipo === "comentario_abogado") setActiveSection("revision");
+    else if (n.tipo === "comentario_abogado") setActiveSection("comentarios");
+    else if (n.tipo === "caso_devuelto_log") setActiveSection("revision");
+    else if (n.tipo === "audiencia_creada") setActiveSection("calendario");
+    else if (n.case_id || n.tipo.startsWith("caso") || n.tipo === "actuacion_creada") setActiveSection("revision");
     load();
   };
 
@@ -2763,6 +2805,7 @@ const SeccionInicio = ({ onNavigate }: { onNavigate: (s: string) => void }) => {
   });
   const [loading, setLoading] = useState(true);
   const [directorName, setDirectorName] = useState("");
+  const [notifRecientes, setNotifRecientes] = useState<any[]>([]);
 
   const load = async () => {
     try {
@@ -2770,16 +2813,19 @@ const SeccionInicio = ({ onNavigate }: { onNavigate: (s: string) => void }) => {
     const hoy = new Date().toISOString().split("T")[0];
     const en7 = new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0];
 
-    const [
-      { data: cases }, { data: auds }, { data: abRoles }, { data: prof }
+    
+     const [
+      { data: cases }, { data: auds }, { data: abRoles }, { data: prof }, { data: notifs }
     ] = await Promise.all([
       supabase.from("cases").select("id, radicado, cliente_nombre, etapa, abogado_id, urgente, fecha_vencimiento, tipo").neq("etapa", "Cerrado"),
       supabase.from("audiencias").select("id, case_id, titulo, fecha_inicio, enlace_virtual").gte("fecha_inicio", hoy + "T00:00:00").lte("fecha_inicio", en7 + "T23:59:59"),
       supabase.from("user_roles").select("user_id").eq("role", "abogado"),
-      user ? supabase.from("profiles").select("full_name").eq("id", user.id).maybeSingle() : Promise.resolve({ data: null }),
+     user ? supabase.from("profiles").select("full_name").eq("id", user.id).maybeSingle() : Promise.resolve({ data: null }),
+      user ? supabase.from("notificaciones").select("id, tipo, titulo, mensaje, leida, created_at, case_id").eq("user_id", user.id).order("created_at", { ascending: false }).limit(5) : Promise.resolve({ data: [] }),
     ]);
 
     if ((prof as any)?.data?.full_name) setDirectorName((prof as any).data.full_name);
+    setNotifRecientes((notifs ?? []) as any[]);
 
     const casosArr = cases ?? [];
     const casosMap: Record<string, any> = {};
@@ -2943,6 +2989,81 @@ const SeccionInicio = ({ onNavigate }: { onNavigate: (s: string) => void }) => {
               </div>
             </div>
           )}
+          {/* Notificaciones recientes + acceso rápido al calendario */}
+          <div className="grid md:grid-cols-2 gap-5">
+            <div className="bg-card rounded-xl border border-border p-5">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="font-display text-base font-semibold text-foreground flex items-center gap-2">
+                  <Bell className="w-4 h-4 text-accent" /> Notificaciones recientes
+                </h2>
+                <button type="button" onClick={() => onNavigate("notificaciones")} className="font-body text-xs text-accent hover:underline">Ver todas</button>
+              </div>
+              {notifRecientes.length === 0 ? (
+                <p className="font-body text-xs text-muted-foreground py-4 text-center">Sin notificaciones nuevas</p>
+              ) : (
+                <div className="space-y-2">
+                  {notifRecientes.map((n: any) => {
+                    const tipoLabel: Record<string, string> = {
+                      comentario_abogado: "💬 Comentario",
+                      caso_devuelto: "↩️ Devuelto",
+                      caso_devuelto_log: "↩️ Devuelto",
+                      actuacion_creada: "⚖️ Actuación",
+                      audiencia_creada: "🏛 Audiencia",
+                      documento_recibido: "📄 Documento",
+                    };
+                    const label = tipoLabel[n.tipo] ?? "🔔 Alerta";
+                    return (
+                      <button key={n.id} type="button" onClick={() => onNavigate("notificaciones")}
+                        className={`w-full text-left p-3 rounded-lg border flex items-start gap-3 hover:border-accent/30 transition-colors ${n.leida ? "border-border bg-muted/10 opacity-60" : "border-accent/20 bg-accent/5"}`}>
+                        <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${n.leida ? "bg-muted-foreground/30" : "bg-accent"}`} />
+                        <div className="flex-1 min-w-0">
+                          <span className="font-body text-[10px] text-muted-foreground">{label}</span>
+                          <p className="font-body text-xs font-semibold text-foreground truncate">{n.titulo}</p>
+                          <p className="font-body text-[10px] text-muted-foreground line-clamp-1">{n.mensaje}</p>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="bg-card rounded-xl border border-border p-5">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="font-display text-base font-semibold text-foreground flex items-center gap-2">
+                  <CalendarDays className="w-4 h-4 text-accent" /> Próximos eventos
+                </h2>
+                <button type="button" onClick={() => onNavigate("calendario")} className="font-body text-xs text-accent hover:underline">Ver calendario</button>
+              </div>
+              {data.audiencias7.length === 0 && data.vencimientos7.length === 0 ? (
+                <p className="font-body text-xs text-muted-foreground py-4 text-center">Sin eventos en los próximos 7 días</p>
+              ) : (
+                <div className="space-y-2">
+                  {[
+                    ...data.audiencias7.slice(0, 3).map((a: any) => ({
+                      key: "aud-" + a.id, icon: "🏛", label: "Audiencia", titulo: a.titulo,
+                      fecha: new Date(a.fecha_inicio).toLocaleDateString("es-CO", { day: "numeric", month: "short" }),
+                      hora: new Date(a.fecha_inicio).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit", hour12: false }),
+                    })),
+                    ...data.vencimientos7.slice(0, 3).map((c: any) => ({
+                      key: "vc-" + c.id, icon: "⏰", label: "Vencimiento", titulo: `#${c.radicado} — ${c.cliente_nombre}`,
+                      fecha: new Date(c.fecha_vencimiento + "T12:00:00").toLocaleDateString("es-CO", { day: "numeric", month: "short" }),
+                      hora: "",
+                    })),
+                  ].slice(0, 5).map((ev) => (
+                    <button key={ev.key} type="button" onClick={() => onNavigate("calendario")}
+                      className="w-full text-left p-3 rounded-lg border border-border bg-muted/20 hover:border-accent/30 transition-colors flex items-center gap-3">
+                      <span className="text-base">{ev.icon}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-body text-xs font-semibold text-foreground truncate">{ev.titulo}</p>
+                        <p className="font-body text-[10px] text-muted-foreground">{ev.label} · {ev.fecha}{ev.hora ? ` · ${ev.hora}` : ""}</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         </>
       )}
     </div>

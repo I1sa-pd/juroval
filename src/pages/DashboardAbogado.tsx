@@ -379,10 +379,10 @@ const CaseDetail = ({ caso, actuaciones, audiencias, documentos, onBack, onChang
       if (jefeId) {
         await supabase.from("notificaciones").insert({
           user_id: jefeId,
-          case_id: caso.id,
           tipo: "comentario_abogado",
           titulo: "Nuevo comentario de abogado",
           mensaje: `El abogado dejó un comentario en el caso #${caso.radicado}: "${nuevoComentario.trim().slice(0, 80)}${nuevoComentario.length > 80 ? "…" : ""}"`,
+          case_id: caso.id,
         });
       }
       setNuevoComentario("");
