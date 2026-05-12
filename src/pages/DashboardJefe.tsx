@@ -1330,7 +1330,7 @@ const SeccionTerminosJefe = () => {
               </div>
 
               <div className="divide-y divide-border">
-                {etapas.filter(et => et !== "Cerrado").map(etapa => {
+              {etapas.filter(et => et !== "Cerrado" && et !== "Radicado").map(etapa => {
                   const t = terminos[areaActiva]?.[etapa];
                   if (!t) return null;
                   const diasActual = editando[etapa] ?? t.dias;
@@ -1802,8 +1802,9 @@ const SeccionAbogados = () => {
   );
 };
 
-/* ── Calendario General ── */
 const SeccionCalendarioJefe = () => {
+  const { toast } = useToast();
+  const { user } = useAuth();
   const [eventos, setEventos] = useState<any[]>([]);
   const [abogadosMap, setAbogadosMap] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -1814,46 +1815,85 @@ const SeccionCalendarioJefe = () => {
   const [diaSeleccionado, setDiaSeleccionado] = useState<string | null>(null);
   const [filtro, setFiltro] = useState<string>("todos");
 
- const load = async () => {
+  // Estado formulario audiencia
+  const [showFormAud, setShowFormAud] = useState(false);
+  const [savingAud, setSavingAud] = useState(false);
+  const [editAudId, setEditAudId] = useState<string | null>(null);
+  const [casesAll, setCasesAll] = useState<any[]>([]);
+  const [abogadosList, setAbogadosList] = useState<any[]>([]);
+  const [clientesMap, setClientesMap] = useState<Record<string, { nombre: string; email: string; telefono: string }>>({});
+  const [formAud, setFormAud] = useState({
+    case_id: "", titulo: "", tipo: "", fecha_inicio: "", fecha_fin: "",
+    modalidad: "presencial", enlace_virtual: "", ubicacion: "", notas: "",
+  });
+
+  // Info del caso/cliente seleccionado
+  const casoSeleccionado = casesAll.find(c => c.id === formAud.case_id);
+  const clienteInfo = casoSeleccionado ? clientesMap[casoSeleccionado.cliente_id] : null;
+
+  const resetFormAud = () => {
+    setFormAud({ case_id: "", titulo: "", tipo: "", fecha_inicio: "", fecha_fin: "", modalidad: "presencial", enlace_virtual: "", ubicacion: "", notas: "" });
+    setEditAudId(null);
+    setShowFormAud(false);
+  };
+
+  const load = async () => {
     setLoading(true);
-    const [{ data: auds }, { data: acts }, { data: cases }, { data: profs }, { data: coms }] = await Promise.all([
-      supabase.from("audiencias").select("id, case_id, titulo, fecha_inicio, modalidad, ubicacion, enlace_virtual"),
+    const [{ data: auds }, { data: acts }, { data: cases }, { data: profs }, { data: roleAbogado }, { data: clProfiles }] = await Promise.all([
+      supabase.from("audiencias").select("id, case_id, titulo, tipo, fecha_inicio, fecha_fin, modalidad, ubicacion, enlace_virtual, notas"),
       supabase.from("actuaciones").select("id, case_id, tipo, descripcion, vence_at, cumplida").eq("cumplida", false).not("vence_at", "is", null),
-      supabase.from("cases").select("id, radicado, cliente_nombre, abogado_id, fecha_vencimiento, etapa, tipo").neq("etapa", "Cerrado"),
-      supabase.from("profiles").select("id, full_name"),
-      supabase.from("case_comments").select("id, case_id, author_id, texto, created_at").order("created_at", { ascending: false }).limit(50),
+      supabase.from("cases").select("id, radicado, cliente_nombre, cliente_id, abogado_id, fecha_vencimiento, etapa, tipo").neq("etapa", "Cerrado"),
+      supabase.from("profiles").select("id, full_name, phone, email"),
+      supabase.from("user_roles").select("user_id").eq("role", "abogado"),
+      supabase.from("profiles").select("id, full_name, email, phone"),
     ]);
 
     const pm: Record<string, string> = {};
     (profs ?? []).forEach((p: any) => { pm[p.id] = p.full_name; });
     setAbogadosMap(pm);
 
+    // Mapa de clientes
+    const cm: Record<string, { nombre: string; email: string; telefono: string }> = {};
+    (clProfiles ?? []).forEach((p: any) => { cm[p.id] = { nombre: p.full_name, email: p.email ?? "", telefono: p.phone ?? "" }; });
+    setClientesMap(cm);
+
+    // Abogados
+    const abIds = (roleAbogado ?? []).map((r: any) => r.user_id);
+    setAbogadosList((profs ?? []).filter((p: any) => abIds.includes(p.id)));
+
+    setCasesAll(cases ?? []);
+
     const casosMap: Record<string, any> = {};
     (cases ?? []).forEach((c: any) => { casosMap[c.id] = c; });
 
     const evs: any[] = [];
 
-    // 1. Audiencias
     (auds ?? []).forEach((a: any) => {
       const caso = casosMap[a.case_id];
       if (!caso) return;
       evs.push({
         id: "aud-" + a.id,
+        audId: a.id,
         fecha: a.fecha_inicio.split("T")[0],
         hora: new Date(a.fecha_inicio).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit", hour12: false }),
+        horaFin: a.fecha_fin ? new Date(a.fecha_fin).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit", hour12: false }) : null,
         titulo: a.titulo,
+        tipoAud: a.tipo,
         tipo: "audiencia",
         radicado: caso.radicado,
         tipoCaso: caso.tipo,
         cliente: caso.cliente_nombre,
+        clienteId: caso.cliente_id,
         abogado_id: caso.abogado_id,
         modalidad: a.modalidad,
         enlace: a.enlace_virtual,
         ubicacion: a.ubicacion,
+        notas: a.notas,
+        rawAud: a,
+        rawCaso: caso,
       });
     });
 
-    // 2. Actuaciones con vencimiento (entregas, memoriales, oficios, términos)
     (acts ?? []).forEach((a: any) => {
       const caso = casosMap[a.case_id];
       if (!caso || !a.vence_at) return;
@@ -1873,7 +1913,6 @@ const SeccionCalendarioJefe = () => {
       });
     });
 
-    // 3. Fechas de vencimiento de casos
     (cases ?? []).forEach((c: any) => {
       if (!c.fecha_vencimiento) return;
       evs.push({
@@ -1889,11 +1928,66 @@ const SeccionCalendarioJefe = () => {
       });
     });
 
-  
-
     evs.sort((a, b) => a.fecha.localeCompare(b.fecha) || a.hora.localeCompare(b.hora));
     setEventos(evs);
     setLoading(false);
+  };
+
+  const guardarAudiencia = async () => {
+    if (!formAud.case_id || !formAud.titulo || !formAud.fecha_inicio || !user) {
+      toast({ title: "Faltan datos", description: "Caso, título y fecha de inicio son obligatorios.", variant: "destructive" });
+      return;
+    }
+    setSavingAud(true);
+    const payload: any = {
+      case_id: formAud.case_id,
+      titulo: formAud.titulo,
+      tipo: formAud.tipo || null,
+      fecha_inicio: formAud.fecha_inicio,
+      fecha_fin: formAud.fecha_fin || null,
+      modalidad: formAud.modalidad,
+      enlace_virtual: formAud.enlace_virtual || null,
+      ubicacion: formAud.ubicacion || null,
+      notas: formAud.notas || null,
+      created_by: user.id,
+    };
+    let error;
+    if (editAudId) {
+      ({ error } = await supabase.from("audiencias").update(payload).eq("id", editAudId));
+    } else {
+      ({ error } = await supabase.from("audiencias").insert(payload));
+    }
+    setSavingAud(false);
+    if (error) { toast({ title: "Error al guardar", description: error.message, variant: "destructive" }); return; }
+    toast({ title: editAudId ? "Audiencia actualizada" : "Audiencia creada" });
+    resetFormAud();
+    load();
+  };
+
+  const eliminarAudiencia = async (audId: string) => {
+    if (!confirm("¿Eliminar esta audiencia?")) return;
+    const { error } = await supabase.from("audiencias").delete().eq("id", audId);
+    if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
+    toast({ title: "Audiencia eliminada" });
+    load();
+  };
+
+  const editarAudiencia = (ev: any) => {
+    const a = ev.rawAud;
+    setFormAud({
+      case_id: a.case_id ?? "",
+      titulo: a.titulo ?? "",
+      tipo: a.tipo ?? "",
+      fecha_inicio: a.fecha_inicio ? a.fecha_inicio.slice(0, 16) : "",
+      fecha_fin: a.fecha_fin ? a.fecha_fin.slice(0, 16) : "",
+      modalidad: a.modalidad ?? "presencial",
+      enlace_virtual: a.enlace_virtual ?? "",
+      ubicacion: a.ubicacion ?? "",
+      notas: a.notas ?? "",
+    });
+    setEditAudId(a.id);
+    setShowFormAud(true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   useEffect(() => { load(); }, []);
@@ -1918,7 +2012,6 @@ const SeccionCalendarioJefe = () => {
     documento:   { dot: "bg-amber-500",  badge: "bg-amber-100 text-amber-700", card: "border-amber-200 bg-amber-50/60", icon: "📄", label: "Entrega de doc." },
     termino:     { dot: "bg-violet-500", badge: "bg-violet-100 text-violet-700",card: "border-violet-200 bg-violet-50/60",icon: "⚖️",label: "Término" },
     vencimiento: { dot: "bg-red-500",    badge: "bg-red-100 text-red-700",     card: "border-red-200 bg-red-50/60",     icon: "⏰", label: "Vencimiento" },
-    
   };
 
   const EventoCard = ({ ev }: { ev: any }) => {
@@ -1970,16 +2063,33 @@ const SeccionCalendarioJefe = () => {
                 {ev.ubicacion ? ` · ${ev.ubicacion}` : ""}
               </p>
             )}
+            {ev.tipoAud && (
+              <p className="font-body text-xs text-muted-foreground">
+                Tipo: <span className="font-medium text-foreground">{ev.tipoAud}</span>
+              </p>
+            )}
+            {ev.notas && (
+              <p className="font-body text-xs text-muted-foreground italic">{ev.notas}</p>
+            )}
             {ev.enlace && (
-              <a
-                href={ev.enlace}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 font-body text-xs px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors"
-              >
+              <a href={ev.enlace} target="_blank" rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 font-body text-xs px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors">
+                <Video className="w-3 h-3" />
                 Unirse a la audiencia virtual
               </a>
             )}
+            <div className="flex gap-2 pt-1">
+              <Button type="button" size="sm" variant="outline"
+                className="font-body text-xs gap-1 h-7"
+                onClick={() => editarAudiencia(ev)}>
+                ✏️ Editar
+              </Button>
+              <Button type="button" size="sm" variant="outline"
+                className="font-body text-xs gap-1 h-7 text-destructive hover:bg-destructive/10 border-destructive/30"
+                onClick={() => eliminarAudiencia(ev.audId)}>
+                🗑️ Eliminar
+              </Button>
+            </div>
           </div>
         )}
       </div>
@@ -1988,7 +2098,130 @@ const SeccionCalendarioJefe = () => {
 
   return (
     <>
-      <SectionHeader title="Calendario General" description="Audiencias con link, entregas de documentos y vencimientos de todos los casos activos" />
+      <div className="flex items-center justify-between mb-8 gap-3 flex-wrap">
+        <div>
+          <h1 className="font-display text-3xl font-bold text-foreground">Calendario General</h1>
+          <p className="font-body text-sm text-muted-foreground mt-2">Audiencias, entregas y vencimientos de todos los casos activos</p>
+        </div>
+        <Button type="button"
+          className="gradient-gold text-primary border-0 font-body font-semibold shadow-gold hover:opacity-90 gap-1.5"
+          onClick={() => { resetFormAud(); setShowFormAud(v => !v); }}>
+          <CalendarDays className="w-4 h-4" />
+          {showFormAud ? "Cancelar" : "Nueva audiencia"}
+        </Button>
+      </div>
+
+      {/* Formulario crear / editar audiencia */}
+      {showFormAud && (
+        <div className="bg-card rounded-xl border border-accent/30 p-5 mb-6 space-y-4">
+          <p className="font-display text-sm font-semibold text-foreground">{editAudId ? "Editar audiencia" : "Nueva audiencia"}</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+            {/* Caso */}
+            <div className="md:col-span-2">
+              <Label className="font-body text-xs text-muted-foreground mb-1 block">Caso *</Label>
+              <select value={formAud.case_id}
+                onChange={e => setFormAud(p => ({ ...p, case_id: e.target.value }))}
+                className="w-full h-9 rounded-md border border-input bg-background px-3 font-body text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/40">
+                <option value="">Selecciona un caso…</option>
+                {casesAll.map((c: any) => (
+                  <option key={c.id} value={c.id}>#{c.radicado} — {c.cliente_nombre} · {c.tipo}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Info del caso y cliente (solo lectura) */}
+            {casoSeleccionado && (
+              <div className="md:col-span-2 grid sm:grid-cols-3 gap-3 bg-muted/30 rounded-xl p-4">
+                <div>
+                  <p className="font-body text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Abogado asignado</p>
+                  <p className="font-body text-sm text-foreground font-medium">{abogadosMap[casoSeleccionado.abogado_id] ?? "Sin asignar"}</p>
+                </div>
+                <div>
+                  <p className="font-body text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Cliente</p>
+                  <p className="font-body text-sm text-foreground font-medium">{casoSeleccionado.cliente_nombre}</p>
+                  {clienteInfo?.email && <p className="font-body text-xs text-muted-foreground">{clienteInfo.email}</p>}
+                  {clienteInfo?.telefono && <p className="font-body text-xs text-muted-foreground">{clienteInfo.telefono}</p>}
+                </div>
+                <div>
+                  <p className="font-body text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Tipo de proceso</p>
+                  <p className="font-body text-sm text-foreground font-medium">{casoSeleccionado.tipo}</p>
+                  <p className="font-body text-xs text-muted-foreground">Etapa: {casoSeleccionado.etapa}</p>
+                </div>
+              </div>
+            )}
+
+            {/* Título */}
+            <div className="md:col-span-2">
+              <Label className="font-body text-xs text-muted-foreground mb-1 block">Título *</Label>
+              <Input value={formAud.titulo} onChange={e => setFormAud(p => ({ ...p, titulo: e.target.value }))}
+                placeholder="Ej: Audiencia inicial, Audiencia de pruebas…" />
+            </div>
+
+            {/* Tipo */}
+            <div>
+              <Label className="font-body text-xs text-muted-foreground mb-1 block">Tipo de audiencia</Label>
+              <Input value={formAud.tipo} onChange={e => setFormAud(p => ({ ...p, tipo: e.target.value }))}
+                placeholder="Ej: Preliminar, Oral, Conciliación…" />
+            </div>
+
+            {/* Modalidad */}
+            <div>
+              <Label className="font-body text-xs text-muted-foreground mb-1 block">Modalidad</Label>
+              <select value={formAud.modalidad}
+                onChange={e => setFormAud(p => ({ ...p, modalidad: e.target.value }))}
+                className="w-full h-9 rounded-md border border-input bg-background px-3 font-body text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/40">
+                <option value="presencial">Presencial</option>
+                <option value="virtual">Virtual</option>
+                <option value="mixta">Mixta</option>
+              </select>
+            </div>
+
+            {/* Fecha inicio */}
+            <div>
+              <Label className="font-body text-xs text-muted-foreground mb-1 block">Fecha y hora inicio *</Label>
+              <Input type="datetime-local" value={formAud.fecha_inicio}
+                onChange={e => setFormAud(p => ({ ...p, fecha_inicio: e.target.value }))} />
+            </div>
+
+            {/* Fecha fin */}
+            <div>
+              <Label className="font-body text-xs text-muted-foreground mb-1 block">Fecha y hora fin</Label>
+              <Input type="datetime-local" value={formAud.fecha_fin}
+                onChange={e => setFormAud(p => ({ ...p, fecha_fin: e.target.value }))} />
+            </div>
+
+            {/* Ubicación */}
+            <div>
+              <Label className="font-body text-xs text-muted-foreground mb-1 block">Ubicación / Sala</Label>
+              <Input value={formAud.ubicacion} onChange={e => setFormAud(p => ({ ...p, ubicacion: e.target.value }))}
+                placeholder="Ej: Sala 3, Juzgado 5 Civil…" />
+            </div>
+
+            {/* Enlace virtual */}
+            <div>
+              <Label className="font-body text-xs text-muted-foreground mb-1 block">Enlace virtual</Label>
+              <Input value={formAud.enlace_virtual} onChange={e => setFormAud(p => ({ ...p, enlace_virtual: e.target.value }))}
+                placeholder="https://meet.google.com/…" />
+            </div>
+
+            {/* Notas */}
+            <div className="md:col-span-2">
+              <Label className="font-body text-xs text-muted-foreground mb-1 block">Notas internas</Label>
+              <Textarea value={formAud.notas} onChange={e => setFormAud(p => ({ ...p, notas: e.target.value }))}
+                placeholder="Observaciones para el equipo…" rows={2} className="resize-none" />
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-1">
+            <Button type="button" variant="outline" onClick={resetFormAud} className="font-body text-xs">Cancelar</Button>
+            <Button type="button" onClick={guardarAudiencia} disabled={savingAud}
+              className="gradient-gold text-primary border-0 font-body font-semibold shadow-gold hover:opacity-90">
+              {savingAud ? "Guardando…" : editAudId ? "Guardar cambios" : "Crear audiencia"}
+            </Button>
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <p className="font-body text-sm text-muted-foreground">Cargando calendario…</p>
@@ -2138,7 +2371,6 @@ const SeccionCalendarioJefe = () => {
     </>
   );
 };
-
 
 /* ── Analítica (dashboard real con gráficos) ── */
 const SeccionAnaliticaJefe = () => {
