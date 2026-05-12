@@ -2907,6 +2907,7 @@ const SeccionNotificacionesJefe = ({ setActiveSection }: { setActiveSection: (s:
     load();
   };
 
+
   const marcarTodas = async () => {
     const ids = notifs.filter(n => !n.leida).map(n => n.id);
     if (ids.length === 0) return;
