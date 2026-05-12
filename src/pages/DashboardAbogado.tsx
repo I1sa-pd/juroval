@@ -763,6 +763,27 @@ const SeccionTerminos = ({ casos, actuaciones, onOpenCase, onChanged }: { casos:
   const casoMap = useMemo(() => Object.fromEntries(casos.map(c => [c.id, c])), [casos]);
   const pendientes = actuaciones.filter(a => a.vence_at && !a.cumplida);
   const today = new Date(); today.setHours(0,0,0,0);
+  const [tab, setTab] = useState<"activos" | "plazos">("activos");
+  const [areasTerminos, setAreasTerminos] = useState<Record<string, { etapa: string; dias_plazo: number; descripcion: string }[]>>({});
+  const [loadingPlazos, setLoadingPlazos] = useState(false);
+  const [areaActiva, setAreaActiva] = useState<string>("");
+
+  useEffect(() => {
+    if (tab !== "plazos") return;
+    setLoadingPlazos(true);
+    (async () => {
+      const { data } = await supabase.from("terminos_procesales").select("area, etapa, dias_plazo, descripcion").order("area").order("etapa");
+      const map: Record<string, { etapa: string; dias_plazo: number; descripcion: string }[]> = {};
+      (data ?? []).forEach((t: any) => {
+        if (!map[t.area]) map[t.area] = [];
+        map[t.area].push({ etapa: t.etapa, dias_plazo: t.dias_plazo, descripcion: t.descripcion });
+      });
+      setAreasTerminos(map);
+      const areas = Object.keys(map);
+      if (areas.length > 0 && !areaActiva) setAreaActiva(areas[0]);
+      setLoadingPlazos(false);
+    })();
+  }, [tab]);
 
   const eliminar = async (e: React.MouseEvent, act: Actuacion) => {
     e.stopPropagation();
@@ -775,46 +796,108 @@ const SeccionTerminos = ({ casos, actuaciones, onOpenCase, onChanged }: { casos:
 
   return (
     <>
-      <SectionHeader title="Control de Términos" description="Plazos procesales activos en tus casos. Haz clic para ir al caso." />
-      {pendientes.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No hay términos pendientes.</p>
-      ) : (
-        <div className="grid gap-4">
-          {pendientes.map((t) => {
-            const vence = new Date(t.vence_at!);
-            const diasRestantes = Math.ceil((vence.getTime() - today.getTime()) / 86400000);
-            const total = t.termino_dias ?? 15;
-            const transcurridos = total - diasRestantes;
-            const pct = Math.max(0, Math.min(100, (transcurridos / total) * 100));
-            const urgente = diasRestantes <= 2;
-            const vencido = diasRestantes < 0;
-            const caso = casoMap[t.case_id];
-            return (
-              <button key={t.id} onClick={() => onOpenCase(t.case_id)} className="text-left bg-card rounded-xl border border-border p-5 hover:border-accent/30 hover:shadow-luxury transition-all">
-                <div className="flex items-center justify-between mb-3 gap-3">
-                  <div className="flex items-center gap-3">
-                    {(urgente || vencido) && <AlertTriangle className="w-4 h-4 text-destructive" />}
-                    <div>
-                      <p className="font-display text-base font-semibold text-foreground">{t.tipo}</p>
-                      <p className="font-body text-xs text-muted-foreground">Caso {caso?.radicado ?? "—"} · {t.descripcion}</p>
+      <SectionHeader title="Control de Términos" description="Plazos procesales activos y plazos configurados por el director." />
+
+      {/* Tabs */}
+      <div className="flex gap-2 mb-6 border-b border-border">
+        {([
+          { id: "activos", label: `Términos activos (${pendientes.length})` },
+          { id: "plazos", label: "Plazos por área" },
+        ] as const).map(t => (
+          <button key={t.id} type="button" onClick={() => setTab(t.id)}
+            className={`font-body text-sm px-4 py-2 border-b-2 transition-colors ${tab === t.id ? "border-accent text-foreground font-medium" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "activos" && (
+        pendientes.length === 0 ? (
+          <div className="bg-card rounded-xl border border-border p-10 text-center">
+            <CheckCircle2 className="w-10 h-10 text-accent mx-auto mb-3" />
+            <p className="font-body text-sm text-muted-foreground">No hay términos pendientes.</p>
+          </div>
+        ) : (
+          <div className="grid gap-4">
+            {pendientes.map((t) => {
+              const vence = new Date(t.vence_at!);
+              const diasRestantes = Math.ceil((vence.getTime() - today.getTime()) / 86400000);
+              const total = t.termino_dias ?? 15;
+              const transcurridos = total - diasRestantes;
+              const pct = Math.max(0, Math.min(100, (transcurridos / total) * 100));
+              const urgente = diasRestantes <= 2;
+              const vencido = diasRestantes < 0;
+              const caso = casoMap[t.case_id];
+              return (
+                <button key={t.id} onClick={() => onOpenCase(t.case_id)} className="text-left bg-card rounded-xl border border-border p-5 hover:border-accent/30 hover:shadow-luxury transition-all">
+                  <div className="flex items-center justify-between mb-3 gap-3">
+                    <div className="flex items-center gap-3">
+                      {(urgente || vencido) && <AlertTriangle className="w-4 h-4 text-destructive" />}
+                      <div>
+                        <p className="font-display text-base font-semibold text-foreground">{t.tipo}</p>
+                        <p className="font-body text-xs text-muted-foreground">Caso {caso?.radicado ?? "—"} · {t.descripcion}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className={`font-body text-sm font-semibold ${urgente || vencido ? "text-destructive" : "text-foreground"}`}>
+                        {vencido ? `Vencido hace ${Math.abs(diasRestantes)} d` : `${diasRestantes} días restantes`}
+                      </span>
+                      <button onClick={(e) => eliminar(e, t)} className="p-1.5 rounded-md bg-muted text-muted-foreground hover:text-destructive" title="Eliminar">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <span className={`font-body text-sm font-semibold ${urgente || vencido ? "text-destructive" : "text-foreground"}`}>
-                      {vencido ? `Vencido hace ${Math.abs(diasRestantes)} d` : `${diasRestantes} días restantes`}
-                    </span>
-                    <button onClick={(e) => eliminar(e, t)} className="p-1.5 rounded-md bg-muted text-muted-foreground hover:text-destructive" title="Eliminar">
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                  <div className="w-full h-2 rounded-full bg-muted">
+                    <div className={`h-2 rounded-full transition-all ${urgente || vencido ? "bg-destructive" : "bg-accent"}`} style={{ width: `${pct}%` }} />
                   </div>
+                </button>
+              );
+            })}
+          </div>
+        )
+      )}
+
+      {tab === "plazos" && (
+        loadingPlazos ? (
+          <p className="font-body text-sm text-muted-foreground">Cargando plazos…</p>
+        ) : Object.keys(areasTerminos).length === 0 ? (
+          <p className="font-body text-sm text-muted-foreground">No hay plazos configurados aún.</p>
+        ) : (
+          <>
+            {/* Selector de área */}
+            <div className="flex gap-2 flex-wrap mb-6">
+              {Object.keys(areasTerminos).map(a => (
+                <button key={a} type="button" onClick={() => setAreaActiva(a)}
+                  className={`font-body text-xs px-4 py-2 rounded-full border transition-colors ${areaActiva === a ? "border-accent bg-accent/10 text-foreground font-medium" : "border-border text-muted-foreground hover:border-accent/40"}`}>
+                  {a}
+                </button>
+              ))}
+            </div>
+
+            {areaActiva && areasTerminos[areaActiva] && (
+              <div className="bg-card rounded-xl border border-border overflow-hidden">
+                <div className="p-4 border-b border-border">
+                  <p className="font-display text-base font-semibold text-foreground">{areaActiva}</p>
+                  <p className="font-body text-xs text-muted-foreground">Plazos en días por etapa — configurados por el director</p>
                 </div>
-                <div className="w-full h-2 rounded-full bg-muted">
-                  <div className={`h-2 rounded-full transition-all ${urgente || vencido ? "bg-destructive" : "bg-accent"}`} style={{ width: `${pct}%` }} />
+                <div className="divide-y divide-border">
+                  {areasTerminos[areaActiva].map(t => (
+                    <div key={t.etapa} className="flex items-center justify-between px-5 py-4">
+                      <div>
+                        <p className="font-body text-sm font-medium text-foreground">{t.etapa}</p>
+                        {t.descripcion && <p className="font-body text-xs text-muted-foreground mt-0.5">{t.descripcion}</p>}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-display text-xl font-bold text-accent">{t.dias_plazo}</span>
+                        <span className="font-body text-xs text-muted-foreground">días</span>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              </button>
-            );
-          })}
-        </div>
+              </div>
+            )}
+          </>
+        )
       )}
     </>
   );
