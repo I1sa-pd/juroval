@@ -46,6 +46,18 @@ const ContactSection = () => {
       return;
     }
 
+    // Notificar al director sobre la nueva solicitud
+    const { data: jefeRoles } = await supabase.from("user_roles").select("user_id").eq("role", "jefe");
+    const jefeId = jefeRoles?.[0]?.user_id;
+    if (jefeId) {
+      await supabase.from("notificaciones").insert({
+        user_id: jefeId,
+        case_id: null,
+        tipo: "solicitud_contacto",
+        titulo: "Nueva solicitud de contacto",
+        mensaje: `${form.nombre.trim()} (${form.telefono.trim()}) solicitó contacto por "${form.motivo}"${form.mensaje.trim() ? `: ${form.mensaje.trim().slice(0, 100)}` : ""}.`,
+      });
+    }
     setEnviado(true);
     setForm({ nombre: "", email: "", motivo: "", telefono: "", mensaje: "" });
     setTimeout(() => setEnviado(false), 6000);

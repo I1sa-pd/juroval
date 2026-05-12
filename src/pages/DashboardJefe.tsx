@@ -1159,30 +1159,15 @@ const SeccionTerminosJefe = () => {
   const [alertas, setAlertas] = useState<any[]>([]);
   const [abogadosMap, setAbogadosMap] = useState<Record<string, string>>({});
   const [limiteDias, setLimiteDias] = useState(7);
-  const [tab, setTab] = useState<"plazos" | "alertas" | "audiencias">("plazos");
-
-  // Audiencias state
-  const [audiencias, setAudiencias] = useState<any[]>([]);
-  const [casesMap, setCasesMap] = useState<Record<string, any>>({});
-  const [filtroAud, setFiltroAud] = useState<"proximas" | "pasadas" | "todas">("proximas");
-  const [showFormAud, setShowFormAud] = useState(false);
-  const [savingAud, setSavingAud] = useState(false);
-  const [casesAll, setCasesAll] = useState<any[]>([]);
-  const [formAud, setFormAud] = useState({
-    case_id: "", titulo: "", tipo: "", fecha_inicio: "", fecha_fin: "",
-    modalidad: "presencial", enlace_virtual: "", ubicacion: "", notas: "",
-  });
-  const [editAudId, setEditAudId] = useState<string | null>(null);
-  const { user } = useAuth();
+  const [tab, setTab] = useState<"plazos" | "alertas">("plazos");
 
   const load = async () => {
     setLoading(true);
-    const [{ data: tData }, { data: cases }, { data: acts }, { data: profs }, { data: auds }] = await Promise.all([
-      supabase.from("terminos_procesales").select("id, area, etapa, dias_plazo, descripcion").neq("etapa", "Radicado").neq("etapa", "Cerrado").order("area").order("etapa"),
+    const [{ data: tData }, { data: cases }, { data: acts }, { data: profs }] = await Promise.all([
+      supabase.from("terminos_procesales").select("id, area, etapa, dias_plazo, descripcion").order("area").order("etapa"),
       supabase.from("cases").select("id, radicado, cliente_nombre, etapa, abogado_id, tipo, urgente, created_at").neq("etapa", "Cerrado"),
       supabase.from("actuaciones").select("case_id, created_at").order("created_at", { ascending: false }),
       supabase.from("profiles").select("id, full_name"),
-      supabase.from("audiencias").select("id, case_id, titulo, tipo, fecha_inicio, fecha_fin, modalidad, enlace_virtual, ubicacion, resultado, notas, created_by").order("fecha_inicio", { ascending: true }),
     ]);
 
     // Build terminos map
@@ -1218,88 +1203,10 @@ const SeccionTerminosJefe = () => {
       .sort((a: any, b: any) => (b.diasSinMov - b.plazo) - (a.diasSinMov - a.plazo));
 
     setAlertas(rows);
-
-    // Build audiencias
-    const cm: Record<string, any> = {};
-    (cases ?? []).forEach((c: any) => { cm[c.id] = c; });
-    const audCaseIds = (auds ?? []).map((a: any) => a.case_id).filter(Boolean);
-    const missingIds = audCaseIds.filter((id: string) => !cm[id]);
-    if (missingIds.length > 0) {
-      const { data: extraCases } = await supabase.from("cases").select("id, radicado, cliente_nombre, tipo, etapa").in("id", missingIds);
-      (extraCases ?? []).forEach((c: any) => { cm[c.id] = c; });
-    }
-    setCasesMap(cm);
-    setCasesAll([...(cases ?? [])]);
-    setAudiencias(auds ?? []);
-
     setLoading(false);
   };
 
   useEffect(() => { load(); }, [limiteDias]);
-
-  const resetFormAud = () => {
-    setFormAud({ case_id: "", titulo: "", tipo: "", fecha_inicio: "", fecha_fin: "", modalidad: "presencial", enlace_virtual: "", ubicacion: "", notas: "" });
-    setEditAudId(null);
-    setShowFormAud(false);
-  };
-
-  const guardarAudiencia = async () => {
-    if (!formAud.case_id || !formAud.titulo || !formAud.fecha_inicio || !user) {
-      toast({ title: "Faltan datos", description: "Caso, título y fecha de inicio son obligatorios.", variant: "destructive" });
-      return;
-    }
-    setSavingAud(true);
-    const payload: any = {
-      case_id: formAud.case_id,
-      titulo: formAud.titulo,
-      tipo: formAud.tipo || null,
-      fecha_inicio: formAud.fecha_inicio,
-      fecha_fin: formAud.fecha_fin || null,
-      modalidad: formAud.modalidad,
-      enlace_virtual: formAud.enlace_virtual || null,
-      ubicacion: formAud.ubicacion || null,
-      notas: formAud.notas || null,
-      created_by: user.id,
-    };
-    let error;
-    if (editAudId) {
-      ({ error } = await supabase.from("audiencias").update(payload).eq("id", editAudId));
-    } else {
-      ({ error } = await supabase.from("audiencias").insert(payload));
-    }
-    if (error) {
-      toast({ title: "Error al guardar", description: error.message, variant: "destructive" });
-    } else {
-      toast({ title: editAudId ? "Audiencia actualizada" : "Audiencia creada", description: `La audiencia "${formAud.titulo}" fue guardada.` });
-      resetFormAud();
-      load();
-    }
-    setSavingAud(false);
-  };
-
-  const eliminarAudiencia = async (id: string, titulo: string) => {
-    if (!confirm(`¿Eliminar la audiencia "${titulo}"?`)) return;
-    const { error } = await supabase.from("audiencias").delete().eq("id", id);
-    if (error) { toast({ title: "Error al eliminar", description: error.message, variant: "destructive" }); return; }
-    toast({ title: "Audiencia eliminada" });
-    load();
-  };
-
-  const editarAudiencia = (a: any) => {
-    setFormAud({
-      case_id: a.case_id ?? "",
-      titulo: a.titulo ?? "",
-      tipo: a.tipo ?? "",
-      fecha_inicio: a.fecha_inicio ? a.fecha_inicio.slice(0, 16) : "",
-      fecha_fin: a.fecha_fin ? a.fecha_fin.slice(0, 16) : "",
-      modalidad: a.modalidad ?? "presencial",
-      enlace_virtual: a.enlace_virtual ?? "",
-      ubicacion: a.ubicacion ?? "",
-      notas: a.notas ?? "",
-    });
-    setEditAudId(a.id);
-    setShowFormAud(true);
-  };
 
   const guardarCambios = async () => {
     if (!areaActiva) return;
@@ -1366,7 +1273,6 @@ const SeccionTerminosJefe = () => {
         {([
           { id: "plazos", label: "Plazos por área" },
           { id: "alertas", label: `Casos vencidos${alertas.length > 0 ? ` (${alertas.length})` : ""}` },
-          { id: "audiencias", label: `Audiencias${audiencias.length > 0 ? ` (${audiencias.length})` : ""}` },
         ] as const).map(t => (
           <button key={t.id} type="button" onClick={() => setTab(t.id)}
             className={`font-body text-sm px-4 py-2 border-b-2 transition-colors ${tab === t.id ? "border-accent text-foreground font-medium" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
@@ -1405,7 +1311,7 @@ const SeccionTerminosJefe = () => {
               </div>
 
               <div className="divide-y divide-border">
-                {etapas.filter(et => et !== "Cerrado" && et !== "Radicado").map(etapa => {
+                {etapas.filter(et => et !== "Cerrado").map(etapa => {
                   const t = terminos[areaActiva]?.[etapa];
                   if (!t) return null;
                   const diasActual = editando[etapa] ?? t.dias;
@@ -1452,7 +1358,7 @@ const SeccionTerminosJefe = () => {
             </div>
           )}
         </>
-      ) : tab === "alertas" ? (
+      ) : (
         <>
           {/* Tab Alertas */}
           <div className="flex items-center gap-4 mb-5 p-4 bg-card rounded-xl border border-border">
@@ -1481,6 +1387,7 @@ const SeccionTerminosJefe = () => {
                 <div key={caso.id} className={`rounded-xl border p-4 flex items-center gap-4 ${getBorder(caso.diasSinMov, caso.plazo)}`}>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap mb-1">
+                      <p className="font-display text-sm font-semibold text-foreground">#{caso.radicado}</p>
                       {caso.urgente && <span className="text-[10px] px-2 py-0.5 rounded-full bg-destructive/10 text-destructive font-body">URGENTE</span>}
                       <span className={`text-[10px] px-2 py-0.5 rounded-full font-body font-medium ${getBadge(caso.diasSinMov, caso.plazo)}`}>
                         {caso.diasSinMov - caso.plazo} días sobre el plazo
@@ -1513,215 +1420,6 @@ const SeccionTerminosJefe = () => {
               ))}
             </div>
           )}
-        </>
-      ) : (
-        /* ── TAB AUDIENCIAS ── */
-        <>
-          {/* Header + botón crear */}
-          <div className="flex items-center justify-between mb-5">
-            <div>
-              <p className="font-display text-base font-semibold text-foreground">Audiencias</p>
-              <p className="font-body text-xs text-muted-foreground">Gestiona todas las audiencias del despacho</p>
-            </div>
-            <Button type="button"
-              className="gradient-gold text-primary border-0 font-body font-semibold shadow-gold hover:opacity-90 gap-1.5"
-              onClick={() => { resetFormAud(); setShowFormAud(v => !v); }}>
-              <CalendarDays className="w-4 h-4" />
-              {showFormAud ? "Cancelar" : "Nueva audiencia"}
-            </Button>
-          </div>
-
-          {/* Formulario crear / editar */}
-          {showFormAud && (
-            <div className="bg-card rounded-xl border border-accent/30 p-5 mb-6 space-y-4">
-              <p className="font-display text-sm font-semibold text-foreground">{editAudId ? "Editar audiencia" : "Nueva audiencia"}</p>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Caso */}
-                <div className="md:col-span-2">
-                  <Label className="font-body text-xs text-muted-foreground mb-1 block">Caso *</Label>
-                  <select value={formAud.case_id}
-                    onChange={e => setFormAud(p => ({ ...p, case_id: e.target.value }))}
-                    className="w-full h-9 rounded-md border border-input bg-background px-3 font-body text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/40">
-                    <option value="">Selecciona un caso…</option>
-                    {casesAll.map((c: any) => (
-                      <option key={c.id} value={c.id}>#{c.radicado} — {c.cliente_nombre}</option>
-                    ))}
-                  </select>
-                </div>
-                {/* Título */}
-                <div className="md:col-span-2">
-                  <Label className="font-body text-xs text-muted-foreground mb-1 block">Título *</Label>
-                  <Input value={formAud.titulo} onChange={e => setFormAud(p => ({ ...p, titulo: e.target.value }))}
-                    placeholder="Ej: Audiencia inicial, Audiencia de pruebas…" />
-                </div>
-                {/* Tipo */}
-                <div>
-                  <Label className="font-body text-xs text-muted-foreground mb-1 block">Tipo</Label>
-                  <Input value={formAud.tipo} onChange={e => setFormAud(p => ({ ...p, tipo: e.target.value }))}
-                    placeholder="Ej: Preliminar, Oral, Conciliación…" />
-                </div>
-                {/* Modalidad */}
-                <div>
-                  <Label className="font-body text-xs text-muted-foreground mb-1 block">Modalidad</Label>
-                  <select value={formAud.modalidad}
-                    onChange={e => setFormAud(p => ({ ...p, modalidad: e.target.value }))}
-                    className="w-full h-9 rounded-md border border-input bg-background px-3 font-body text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/40">
-                    <option value="presencial">Presencial</option>
-                    <option value="virtual">Virtual</option>
-                    <option value="mixta">Mixta</option>
-                  </select>
-                </div>
-                {/* Fecha inicio */}
-                <div>
-                  <Label className="font-body text-xs text-muted-foreground mb-1 block">Fecha y hora inicio *</Label>
-                  <Input type="datetime-local" value={formAud.fecha_inicio}
-                    onChange={e => setFormAud(p => ({ ...p, fecha_inicio: e.target.value }))} />
-                </div>
-                {/* Fecha fin */}
-                <div>
-                  <Label className="font-body text-xs text-muted-foreground mb-1 block">Fecha y hora fin</Label>
-                  <Input type="datetime-local" value={formAud.fecha_fin}
-                    onChange={e => setFormAud(p => ({ ...p, fecha_fin: e.target.value }))} />
-                </div>
-                {/* Ubicación */}
-                <div>
-                  <Label className="font-body text-xs text-muted-foreground mb-1 block">Ubicación / Sala</Label>
-                  <Input value={formAud.ubicacion} onChange={e => setFormAud(p => ({ ...p, ubicacion: e.target.value }))}
-                    placeholder="Ej: Sala 3, Juzgado 5 Civil…" />
-                </div>
-                {/* Enlace virtual */}
-                <div>
-                  <Label className="font-body text-xs text-muted-foreground mb-1 block">Enlace virtual</Label>
-                  <Input value={formAud.enlace_virtual} onChange={e => setFormAud(p => ({ ...p, enlace_virtual: e.target.value }))}
-                    placeholder="https://meet.google.com/…" />
-                </div>
-                {/* Notas */}
-                <div className="md:col-span-2">
-                  <Label className="font-body text-xs text-muted-foreground mb-1 block">Notas internas</Label>
-                  <Textarea value={formAud.notas} onChange={e => setFormAud(p => ({ ...p, notas: e.target.value }))}
-                    placeholder="Observaciones para el equipo…" rows={2} className="resize-none" />
-                </div>
-              </div>
-              <div className="flex justify-end gap-2 pt-1">
-                <Button type="button" variant="outline" onClick={resetFormAud} className="font-body text-xs">Cancelar</Button>
-                <Button type="button" onClick={guardarAudiencia} disabled={savingAud}
-                  className="gradient-gold text-primary border-0 font-body font-semibold shadow-gold hover:opacity-90">
-                  {savingAud ? "Guardando…" : editAudId ? "Guardar cambios" : "Crear audiencia"}
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {/* Filtro proximas / pasadas / todas */}
-          <div className="flex gap-2 mb-5">
-            {([
-              { id: "proximas", label: "Próximas" },
-              { id: "pasadas",  label: "Pasadas" },
-              { id: "todas",    label: "Todas" },
-            ] as const).map(f => (
-              <button key={f.id} type="button" onClick={() => setFiltroAud(f.id)}
-                className={`font-body text-xs px-4 py-1.5 rounded-full border transition-colors ${filtroAud === f.id ? "border-accent bg-accent/10 text-foreground font-medium" : "border-border text-muted-foreground hover:border-accent/40"}`}>
-                {f.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Lista de audiencias */}
-          {(() => {
-            const hoy = new Date();
-            const lista = audiencias.filter((a: any) => {
-              const fecha = new Date(a.fecha_inicio);
-              if (filtroAud === "proximas") return fecha >= hoy;
-              if (filtroAud === "pasadas")  return fecha < hoy;
-              return true;
-            });
-            if (lista.length === 0) return (
-              <div className="bg-card rounded-xl border border-border p-12 text-center">
-                <CalendarDays className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
-                <p className="font-display text-base font-semibold text-foreground">Sin audiencias</p>
-                <p className="font-body text-sm text-muted-foreground mt-1">No hay audiencias {filtroAud === "proximas" ? "programadas" : filtroAud === "pasadas" ? "pasadas" : "registradas"} aún.</p>
-              </div>
-            );
-            return (
-              <div className="grid gap-3">
-                {lista.map((a: any) => {
-                  const caso = casesMap[a.case_id];
-                  const esPasada = new Date(a.fecha_inicio) < hoy;
-                  const esVirtual = a.modalidad === "virtual" || a.modalidad === "mixta";
-                  return (
-                    <div key={a.id} className={`bg-card rounded-xl border p-4 flex gap-4 items-start ${esPasada ? "border-border opacity-75" : "border-accent/20"}`}>
-                      {/* Icono fecha */}
-                      <div className={`w-12 h-12 rounded-xl flex flex-col items-center justify-center flex-shrink-0 text-center ${esPasada ? "bg-muted" : "bg-accent/10"}`}>
-                        <span className={`font-display text-lg font-bold leading-none ${esPasada ? "text-muted-foreground" : "text-accent"}`}>
-                          {new Date(a.fecha_inicio).getDate()}
-                        </span>
-                        <span className={`font-body text-[9px] uppercase tracking-wide ${esPasada ? "text-muted-foreground" : "text-accent/70"}`}>
-                          {new Date(a.fecha_inicio).toLocaleString("es-CO", { month: "short" })}
-                        </span>
-                      </div>
-                      {/* Info */}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap mb-0.5">
-                          <p className="font-display text-sm font-semibold text-foreground">{a.titulo}</p>
-                          {a.tipo && (
-                            <span className="font-body text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground">{a.tipo}</span>
-                          )}
-                          {esPasada ? (
-                            <span className="font-body text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground">Finalizada</span>
-                          ) : (
-                            <span className="font-body text-[10px] px-2 py-0.5 rounded-full bg-accent/10 text-accent font-medium">Próxima</span>
-                          )}
-                        </div>
-                        {caso && (
-                          <p className="font-body text-xs text-muted-foreground">
-                            Caso <span className="font-medium text-foreground">#{caso.radicado}</span> · {caso.cliente_nombre}
-                          </p>
-                        )}
-                        <div className="flex items-center gap-3 mt-1.5 flex-wrap">
-                          <span className="font-body text-[10px] text-muted-foreground flex items-center gap-1">
-                            <CalendarDays className="w-3 h-3" />
-                            {new Date(a.fecha_inicio).toLocaleString("es-CO", { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false })}
-                            {a.fecha_fin && ` → ${new Date(a.fecha_fin).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit", hour12: false })}`}
-                          </span>
-                          {a.modalidad && (
-                            <span className="font-body text-[10px] text-muted-foreground flex items-center gap-1">
-                              {esVirtual ? <Video className="w-3 h-3" /> : <MapPin className="w-3 h-3" />}
-                              {a.modalidad.charAt(0).toUpperCase() + a.modalidad.slice(1)}
-                            </span>
-                          )}
-                          {a.ubicacion && (
-                            <span className="font-body text-[10px] text-muted-foreground">{a.ubicacion}</span>
-                          )}
-                        </div>
-                        {a.notas && (
-                          <p className="font-body text-[10px] text-muted-foreground mt-1 italic">{a.notas}</p>
-                        )}
-                        {a.enlace_virtual && !esPasada && (
-                          <a href={a.enlace_virtual} target="_blank" rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1.5 mt-2 font-body text-xs px-3 py-1 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors">
-                            <Video className="w-3 h-3" />
-                            Unirse a la audiencia
-                          </a>
-                        )}
-                      </div>
-                      {/* Acciones */}
-                      <div className="flex flex-col gap-1.5 flex-shrink-0">
-                        <Button type="button" size="sm" variant="outline"
-                          className="font-body text-xs gap-1" onClick={() => editarAudiencia(a)}>
-                          ✏️ Editar
-                        </Button>
-                        <Button type="button" size="sm" variant="outline"
-                          className="font-body text-xs gap-1 text-destructive hover:bg-destructive/10 border-destructive/30"
-                          onClick={() => eliminarAudiencia(a.id, a.titulo)}>
-                          🗑️ Eliminar
-                        </Button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            );
-          })()}
         </>
       )}
     </>
@@ -2100,7 +1798,7 @@ const SeccionCalendarioJefe = () => {
   const load = async () => {
     setLoading(true);
     const [{ data: auds }, { data: acts }, { data: cases }, { data: profs }] = await Promise.all([
-      supabase.from("audiencias").select("id, case_id, titulo, tipo, fecha_inicio, fecha_fin, modalidad, ubicacion, enlace_virtual").order("fecha_inicio", { ascending: true }),
+      supabase.from("audiencias").select("id, case_id, titulo, fecha_inicio, modalidad, ubicacion, enlace_virtual"),
       supabase.from("actuaciones").select("id, case_id, tipo, descripcion, vence_at, cumplida").eq("cumplida", false).not("vence_at", "is", null),
       supabase.from("cases").select("id, radicado, cliente_nombre, abogado_id, fecha_vencimiento, etapa, tipo").neq("etapa", "Cerrado"),
       supabase.from("profiles").select("id, full_name"),
@@ -2123,9 +1821,7 @@ const SeccionCalendarioJefe = () => {
         id: "aud-" + a.id,
         fecha: a.fecha_inicio.split("T")[0],
         hora: new Date(a.fecha_inicio).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit", hour12: false }),
-        horaFin: a.fecha_fin ? new Date(a.fecha_fin).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit", hour12: false }) : null,
         titulo: a.titulo,
-        tipoAudiencia: a.tipo,
         tipo: "audiencia",
         radicado: caso.radicado,
         tipoCaso: caso.tipo,
@@ -2244,41 +1940,23 @@ const SeccionCalendarioJefe = () => {
 
         {/* Info de audiencia */}
         {ev.tipo === "audiencia" && (
-          <div className="space-y-1.5">
-            <div className="flex flex-wrap gap-x-3 gap-y-1">
-              {ev.tipoAudiencia && (
-                <span className="font-body text-xs text-muted-foreground">
-                  Tipo: <span className="font-medium text-foreground">{ev.tipoAudiencia}</span>
-                </span>
-              )}
-              {ev.modalidad && (
-                <span className="font-body text-xs text-muted-foreground capitalize">
-                  {ev.modalidad === "virtual" ? "🎥" : ev.modalidad === "mixta" ? "🔀" : "📍"} <span className="font-medium text-foreground">{ev.modalidad}</span>
-                </span>
-              )}
-              {ev.horaFin && (
-                <span className="font-body text-xs text-muted-foreground">
-                  Hasta: <span className="font-medium text-foreground">{ev.horaFin}</span>
-                </span>
-              )}
-            </div>
-            {ev.ubicacion && (
-              <p className="font-body text-xs text-muted-foreground flex items-center gap-1">
-                <MapPin className="w-3 h-3 flex-shrink-0" />
-                {ev.ubicacion}
+          <div className="space-y-1">
+            {ev.modalidad && (
+              <p className="font-body text-xs text-muted-foreground capitalize">
+                Modalidad: <span className="font-medium text-foreground">{ev.modalidad}</span>
+                {ev.ubicacion ? ` · ${ev.ubicacion}` : ""}
               </p>
             )}
-            {ev.enlace ? (
+            {ev.enlace && (
               <a
                 href={ev.enlace}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1.5 font-body text-xs px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors"
               >
-                <Video className="w-3.5 h-3.5" />
                 Unirse a la audiencia virtual
               </a>
-            ) : ev.modalidad === "presencial" && ev.ubicacion ? null : null}
+            )}
           </div>
         )}
       </div>
@@ -2470,7 +2148,6 @@ const SeccionAnaliticaJefe = () => {
 
   useEffect(() => {
     cargarDatos();
-    // Suscripción en tiempo real a cambios en casos, actuaciones y audiencias
     const ch = supabase.channel("analitica-realtime")
       .on("postgres_changes", { event: "*", schema: "public", table: "cases" }, cargarDatos)
       .on("postgres_changes", { event: "*", schema: "public", table: "actuaciones" }, cargarDatos)
@@ -2491,25 +2168,24 @@ const SeccionAnaliticaJefe = () => {
     return dias >= 0 && dias <= 7;
   }).length;
 
-  // ── Datos para gráficas generales ──
-  // Todas las etapas siempre aparecen con 0 si no hay casos
-  const ETAPAS_ORDEN = ["Creación", "Proyección", "Recaudo Probatorio", "Revisión", "Firma", "Radicado"];
+  // ── Vista general ──
+  const ETAPAS_ORDEN = ["Creación", "Proyección", "Recaudo Probatorio", "Revisión", "Firma"];
   const conteoEtapa = casos.filter(c => c.etapa !== "Cerrado").reduce<Record<string, number>>((acc, c) => {
     acc[c.etapa] = (acc[c.etapa] ?? 0) + 1; return acc;
   }, {});
   const porEtapa = ETAPAS_ORDEN.map(name => ({ name, value: conteoEtapa[name] ?? 0 }));
 
-  // Todas las áreas registradas siempre aparecen con 0 si no hay casos activos
-  const conteoArea = casos.filter(c => c.etapa !== "Cerrado").reduce<Record<string, number>>((acc, c) => {
-    const k = areas[c.area_id ?? ""] ?? "Sin área"; acc[k] = (acc[k] ?? 0) + 1; return acc;
+  // Todas las áreas del catálogo siempre aparecen con su nombre real, con 0 si no tienen casos activos
+  const conteoAreaPorId = casos.filter(c => c.etapa !== "Cerrado").reduce<Record<string, number>>((acc, c) => {
+    const k = c.area_id ?? "__sin_area__"; acc[k] = (acc[k] ?? 0) + 1; return acc;
   }, {});
-  const todasLasAreas = Object.values(areas);
-  const porArea = [
-    ...todasLasAreas.map(nombre => ({ name: nombre, value: conteoArea[nombre] ?? 0 })),
-    ...(conteoArea["Sin área"] ? [{ name: "Sin área", value: conteoArea["Sin área"] }] : []),
+  const sinAreaCount = conteoAreaPorId["__sin_area__"] ?? 0;
+  // areas es Record<id, nombre> — siempre mostramos todas las áreas aunque tengan 0 casos
+  const porArea: { name: string; value: number }[] = [
+    ...Object.entries(areas).map(([id, nombre]) => ({ name: nombre || "Sin nombre", value: conteoAreaPorId[id] ?? 0 })),
+    ...(sinAreaCount > 0 ? [{ name: "Sin área", value: sinAreaCount }] : []),
   ].sort((a, b) => b.value - a.value);
 
-  // Nuevos casos por mes — siempre muestra los 6 meses aunque sean 0
   const meses: { name: string; value: number }[] = [];
   for (let i = 5; i >= 0; i--) {
     const d = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);
@@ -2518,17 +2194,8 @@ const SeccionAnaliticaJefe = () => {
     meses.push({ name: label, value: count });
   }
 
-  // Apertura vs cierre mensual (últimos 6 meses)
-  const proyeccion: { name: string; activos: number; cerrados: number }[] = [];
-  for (let i = 5; i >= 0; i--) {
-    const d = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);
-    const label = d.toLocaleDateString("es-CO", { month: "short", year: "2-digit" });
-    const actM = casos.filter(c => { const cd = new Date(c.created_at); return cd.getFullYear() === d.getFullYear() && cd.getMonth() === d.getMonth() && c.etapa !== "Cerrado"; }).length;
-    const cerM = casos.filter(c => { const cd = new Date(c.created_at); return cd.getFullYear() === d.getFullYear() && cd.getMonth() === d.getMonth() && c.etapa === "Cerrado"; }).length;
-    proyeccion.push({ name: label, activos: actM, cerrados: cerM });
-  }
-
-  // ── Datos por abogado ──
+  // ── Por abogado ──
+  const PROJ_COLORS = ["#6366f1", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4", "#ec4899", "#84cc16"];
   const abogadoIds = [...new Set(casos.filter(c => c.abogado_id).map(c => c.abogado_id as string))];
 
   const statsAbogado = abogadoIds.map(id => {
@@ -2548,62 +2215,38 @@ const SeccionAnaliticaJefe = () => {
       const dias = Math.ceil((new Date(c.fecha_vencimiento).getTime() - hoy.getTime()) / 86400000);
       return dias >= 0 && dias <= 7;
     }).length;
-
-    // Proyección mensual: casos acumulados activos por mes (últimos 6 meses)
     const proyMensual: { name: string; value: number }[] = [];
     for (let i = 5; i >= 0; i--) {
       const d = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);
       const label = d.toLocaleDateString("es-CO", { month: "short", year: "2-digit" });
-      // Casos creados hasta este mes (acumulado) que siguen activos
-      const hasta = new Date(d.getFullYear(), d.getMonth() + 1, 0); // último día del mes
-      const count = misCasos.filter(c => {
-        const cd = new Date(c.created_at);
-        return cd <= hasta && c.etapa !== "Cerrado";
-      }).length;
+      const hasta = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+      const count = misCasos.filter(c => new Date(c.created_at) <= hasta && c.etapa !== "Cerrado").length;
       proyMensual.push({ name: label, value: count });
     }
-
-    // Distribución por etapa
-    const porEtapaAbogado = Object.entries(
-      misCasos.filter(c => c.etapa !== "Cerrado").reduce<Record<string, number>>((acc, c) => {
-        acc[c.etapa] = (acc[c.etapa] ?? 0) + 1; return acc;
-      }, {})
-    ).map(([name, value]) => ({ name, value }));
-
-    return {
-      id, nombre, activos: casosActivos, cerrados: casosCerrados, urgentes: casosUrgentes,
-      eficiencia, audProximas, vencenProx, total: misCasos.length,
-      proyMensual, porEtapaAbogado,
-    };
+    return { id, nombre, activos: casosActivos, cerrados: casosCerrados, urgentes: casosUrgentes, eficiencia, audProximas, vencenProx, total: misCasos.length, proyMensual };
   }).sort((a, b) => b.activos - a.activos);
 
-  // Gráfica carga por abogado
-  const cargaAbogado = statsAbogado.map(a => ({ name: a.nombre.split(" ")[0], value: a.activos }));
+  // Para la gráfica horizontal usamos el nombre completo; si no hay abogados con casos el array está vacío
+  const cargaAbogado = statsAbogado.length > 0
+    ? statsAbogado.map(a => ({ name: a.nombre, value: a.activos }))
+    : [{ name: "Sin datos", value: 0 }];
 
-  // Gráfica proyección comparativa por abogado (activos vs cerrados)
-  const proyAbogado = statsAbogado.slice(0, 6).map(a => ({ name: a.nombre.split(" ")[0], activos: a.activos, cerrados: a.cerrados }));
-
-  // Proyección mensual del abogado seleccionado (o todos sumados)
   const proyAbogadoMensual: { name: string; [key: string]: any }[] = [];
   for (let i = 5; i >= 0; i--) {
     const d = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);
     const label = d.toLocaleDateString("es-CO", { month: "short", year: "2-digit" });
     const punto: { name: string; [key: string]: any } = { name: label };
     if (abogadoSeleccionado === "todos") {
-      statsAbogado.forEach(a => {
-        punto[a.nombre.split(" ")[0]] = a.proyMensual[5 - i]?.value ?? 0;
-      });
+      statsAbogado.forEach(a => { punto[a.nombre] = a.proyMensual[5 - i]?.value ?? 0; });
     } else {
       const ab = statsAbogado.find(a => a.id === abogadoSeleccionado);
-      if (ab) punto[ab.nombre.split(" ")[0]] = ab.proyMensual[5 - i]?.value ?? 0;
+      if (ab) punto[ab.nombre] = ab.proyMensual[5 - i]?.value ?? 0;
     }
     proyAbogadoMensual.push(punto);
   }
   const proyLineKeys = abogadoSeleccionado === "todos"
-    ? statsAbogado.map(a => a.nombre.split(" ")[0])
-    : statsAbogado.filter(a => a.id === abogadoSeleccionado).map(a => a.nombre.split(" ")[0]);
-
-  const PROJ_COLORS = ["#6366f1", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4", "#ec4899", "#84cc16"];
+    ? statsAbogado.map(a => a.nombre)
+    : statsAbogado.filter(a => a.id === abogadoSeleccionado).map(a => a.nombre);
 
   const kpis = [
     { label: "Casos Totales", value: total, color: "from-indigo-500 to-violet-500", icon: Briefcase },
@@ -2639,11 +2282,8 @@ const SeccionAnaliticaJefe = () => {
             </span>
           </p>
         </div>
-        <button
-          type="button"
-          onClick={cargarDatos}
-          className="flex items-center gap-2 font-body text-xs px-3 py-2 rounded-lg border border-border hover:bg-muted/50 transition-colors text-muted-foreground hover:text-foreground"
-        >
+        <button type="button" onClick={cargarDatos}
+          className="flex items-center gap-2 font-body text-xs px-3 py-2 rounded-lg border border-border hover:bg-muted/50 transition-colors text-muted-foreground hover:text-foreground">
           <TrendingUp className="w-3.5 h-3.5" />
           Actualizar
         </button>
@@ -2683,11 +2323,36 @@ const SeccionAnaliticaJefe = () => {
                 <ChartCard title="Casos activos por etapa">
                   <RPieChart data={porEtapa} />
                 </ChartCard>
-                <ChartCard title="Casos activos por área de derecho">
-                  <RBarChart data={porArea} />
-                </ChartCard>
+                <div className="bg-card rounded-xl border border-border p-5">
+                  <p className="font-display text-base font-semibold text-foreground mb-4">Casos activos por área de derecho</p>
+                  {porArea.length === 0 ? (
+                    <div className="h-full flex items-center justify-center text-xs text-muted-foreground">Sin áreas registradas</div>
+                  ) : (
+                    <div className="space-y-3">
+                      {(() => {
+                        const max = Math.max(...porArea.map(d => d.value), 1);
+                        return porArea.map((d, i) => (
+                          <div key={d.name} className="flex items-center gap-3">
+                            <span className="font-body text-xs text-muted-foreground w-36 text-right flex-shrink-0 truncate" title={d.name}>{d.name}</span>
+                            <div className="flex-1 h-7 bg-muted/40 rounded-lg overflow-hidden">
+                              <div
+                                className="h-full rounded-lg flex items-center px-2 transition-all duration-500"
+                                style={{
+                                  width: d.value === 0 ? "3px" : `${Math.max(4, (d.value / max) * 100)}%`,
+                                  background: ["#6366f1","#10b981","#f59e0b","#ef4444","#8b5cf6","#06b6d4","#ec4899","#84cc16"][i % 8],
+                                  opacity: d.value === 0 ? 0.25 : 1,
+                                }}
+                              />
+                            </div>
+                            <span className="font-display text-xs font-bold text-foreground w-4 flex-shrink-0">{d.value}</span>
+                          </div>
+                        ));
+                      })()}
+                    </div>
+                  )}
+                </div>
               </div>
-              <div className="grid lg:grid-cols-1 gap-4">
+              <div className="grid gap-4">
                 <ChartCard title="Nuevos casos por mes (últimos 6 meses)">
                   <RLineChart data={meses} />
                 </ChartCard>
@@ -2695,32 +2360,25 @@ const SeccionAnaliticaJefe = () => {
             </>
           ) : (
             <>
-              {/* Selector de abogado para proyección */}
+              {/* Selector de abogado */}
               <div className="flex items-center gap-3 mb-5 flex-wrap">
                 <p className="font-body text-sm text-muted-foreground">Filtrar proyección:</p>
                 <div className="flex gap-2 flex-wrap">
-                  <button
-                    type="button"
-                    onClick={() => setAbogadoSeleccionado("todos")}
-                    className={`font-body text-xs px-3 py-1.5 rounded-full border transition-colors ${abogadoSeleccionado === "todos" ? "border-accent bg-accent/10 text-foreground font-medium" : "border-border text-muted-foreground hover:border-accent/40"}`}
-                  >
+                  <button type="button" onClick={() => setAbogadoSeleccionado("todos")}
+                    className={`font-body text-xs px-3 py-1.5 rounded-full border transition-colors ${abogadoSeleccionado === "todos" ? "border-accent bg-accent/10 text-foreground font-medium" : "border-border text-muted-foreground hover:border-accent/40"}`}>
                     Todos
                   </button>
                   {statsAbogado.map((a, i) => (
-                    <button
-                      key={a.id}
-                      type="button"
-                      onClick={() => setAbogadoSeleccionado(a.id)}
-                      className={`font-body text-xs px-3 py-1.5 rounded-full border transition-colors flex items-center gap-1.5 ${abogadoSeleccionado === a.id ? "border-accent bg-accent/10 text-foreground font-medium" : "border-border text-muted-foreground hover:border-accent/40"}`}
-                    >
+                    <button key={a.id} type="button" onClick={() => setAbogadoSeleccionado(a.id)}
+                      className={`font-body text-xs px-3 py-1.5 rounded-full border transition-colors flex items-center gap-1.5 ${abogadoSeleccionado === a.id ? "border-accent bg-accent/10 text-foreground font-medium" : "border-border text-muted-foreground hover:border-accent/40"}`}>
                       <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: PROJ_COLORS[i % PROJ_COLORS.length] }} />
-                      {a.nombre.split(" ")[0]}
+                      {a.nombre}
                     </button>
                   ))}
                 </div>
               </div>
 
-              {/* Gráfica de proyección mensual por abogado */}
+              {/* Gráfica de proyección mensual */}
               <div className="mb-4">
                 <ChartCard title={`Evolución de casos activos — últimos 6 meses${abogadoSeleccionado !== "todos" ? ` · ${statsAbogado.find(a => a.id === abogadoSeleccionado)?.nombre ?? ""}` : " · todos los abogados"}`}>
                   <RMultiLineChart data={proyAbogadoMensual} lineKeys={proyLineKeys} colors={PROJ_COLORS} />
@@ -2728,13 +2386,33 @@ const SeccionAnaliticaJefe = () => {
               </div>
 
               <div className="mb-4">
-                <ChartCard title="Carga actual por abogado (casos activos)">
-                  <RBarChart data={cargaAbogado} horizontal />
-                </ChartCard>
+                <div className="bg-card rounded-xl border border-border p-5">
+                  <p className="font-display text-base font-semibold text-foreground mb-4">Carga actual por abogado (casos activos)</p>
+                  <div className="space-y-3 mt-2">
+                    {(() => {
+                      const max = Math.max(...cargaAbogado.map(d => d.value), 1);
+                      return cargaAbogado.map((d, i) => (
+                        <div key={d.name} className="flex items-center gap-3">
+                          <span className="font-body text-xs text-muted-foreground w-36 text-right flex-shrink-0 truncate">{d.name}</span>
+                          <div className="flex-1 h-7 bg-muted/40 rounded-lg overflow-hidden">
+                            <div
+                              className="h-full rounded-lg flex items-center px-2 transition-all duration-500"
+                              style={{
+                                width: `${Math.max(4, (d.value / max) * 100)}%`,
+                                background: ["#6366f1","#10b981","#f59e0b","#ef4444","#8b5cf6","#06b6d4","#ec4899","#84cc16"][i % 8],
+                              }}
+                            >
+                              <span className="font-display text-xs font-bold text-white">{d.value}</span>
+                            </div>
+                          </div>
+                        </div>
+                      ));
+                    })()}
+                  </div>
+                </div>
               </div>
 
-
-              {/* Tabla detallada por abogado */}
+              {/* Tabla detallada */}
               <div className="bg-card rounded-xl border border-border overflow-hidden">
                 <div className="p-4 border-b border-border">
                   <p className="font-display text-base font-semibold text-foreground">Detalle por abogado</p>
@@ -2756,28 +2434,21 @@ const SeccionAnaliticaJefe = () => {
                     </thead>
                     <tbody className="divide-y divide-border">
                       {statsAbogado.map((a, i) => (
-                        <tr
-                          key={a.id}
+                        <tr key={a.id}
                           className={`hover:bg-muted/20 transition-colors cursor-pointer ${abogadoSeleccionado === a.id ? "bg-accent/5" : ""}`}
-                          onClick={() => setAbogadoSeleccionado(abogadoSeleccionado === a.id ? "todos" : a.id)}
-                        >
+                          onClick={() => setAbogadoSeleccionado(abogadoSeleccionado === a.id ? "todos" : a.id)}>
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-2">
-                              <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: PROJ_COLORS[i % PROJ_COLORS.length] }}>
+                              <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0"
+                                style={{ background: PROJ_COLORS[i % PROJ_COLORS.length] }}>
                                 <span className="font-display text-xs font-bold text-white">{a.nombre.charAt(0).toUpperCase()}</span>
                               </div>
                               <p className="font-body text-sm font-medium text-foreground">{a.nombre}</p>
                             </div>
                           </td>
-                          <td className="px-3 py-3 text-center">
-                            <span className="font-body text-sm text-muted-foreground">{a.total}</span>
-                          </td>
-                          <td className="px-3 py-3 text-center">
-                            <span className="font-display text-sm font-bold text-foreground">{a.activos}</span>
-                          </td>
-                          <td className="px-3 py-3 text-center">
-                            <span className="font-body text-sm text-muted-foreground">{a.cerrados}</span>
-                          </td>
+                          <td className="px-3 py-3 text-center"><span className="font-body text-sm text-muted-foreground">{a.total}</span></td>
+                          <td className="px-3 py-3 text-center"><span className="font-display text-sm font-bold text-foreground">{a.activos}</span></td>
+                          <td className="px-3 py-3 text-center"><span className="font-body text-sm text-muted-foreground">{a.cerrados}</span></td>
                           <td className="px-3 py-3 text-center">
                             {a.urgentes > 0
                               ? <span className="font-body text-xs px-2 py-0.5 rounded-full bg-destructive/10 text-destructive font-medium">{a.urgentes}</span>
@@ -2793,15 +2464,11 @@ const SeccionAnaliticaJefe = () => {
                               ? <span className="font-body text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">{a.vencenProx}</span>
                               : <span className="font-body text-xs text-muted-foreground">—</span>}
                           </td>
-                          <td className="px-4 py-3 min-w-[140px]">
-                            <EficienciaBar value={a.eficiencia} />
-                          </td>
+                          <td className="px-4 py-3 min-w-[140px]"><EficienciaBar value={a.eficiencia} /></td>
                         </tr>
                       ))}
                       {statsAbogado.length === 0 && (
-                        <tr>
-                          <td colSpan={8} className="px-4 py-8 text-center font-body text-sm text-muted-foreground">No hay abogados con casos asignados.</td>
-                        </tr>
+                        <tr><td colSpan={8} className="px-4 py-8 text-center font-body text-sm text-muted-foreground">No hay abogados con casos asignados.</td></tr>
                       )}
                     </tbody>
                   </table>
@@ -2988,8 +2655,9 @@ const SeccionNotificacionesJefe = ({ setActiveSection }: { setActiveSection: (s:
 
   const onClick = async (n: typeof notifs[number]) => {
     if (!n.leida) await supabase.from("notificaciones").update({ leida: true }).eq("id", n.id);
-    if (n.case_id || n.tipo.startsWith("caso") || n.tipo === "actuacion_creada" || n.tipo === "audiencia_creada") setActiveSection("revision");
-    else if (n.tipo === "documento_recibido") setActiveSection("documentos");
+    if (n.tipo === "solicitud_contacto") setActiveSection("solicitudes");
+    else if (n.tipo === "documento_recibido" || n.tipo === "documento_abogado") setActiveSection("documentos");
+    else if (n.case_id || n.tipo.startsWith("caso") || n.tipo === "actuacion_creada" || n.tipo === "audiencia_creada" || n.tipo === "comentario_abogado") setActiveSection("revision");
     load();
   };
 
@@ -3025,19 +2693,36 @@ const SeccionNotificacionesJefe = ({ setActiveSection }: { setActiveSection: (s:
         </div>
       ) : (
         <div className="grid gap-3">
-          {notifs.map((n) => (
-            <button key={n.id} onClick={() => onClick(n)} className={`text-left bg-card rounded-xl border p-4 flex items-center gap-4 hover:border-accent/30 transition-all ${n.leida ? "border-border opacity-70" : "border-accent/30"}`}>
-              <div className={`w-2 h-2 rounded-full flex-shrink-0 ${n.leida ? "bg-muted-foreground/30" : "bg-accent"}`} />
-              <div className="flex-1 min-w-0">
-                <p className="font-body text-sm font-semibold text-foreground">{n.titulo}</p>
-                <p className="font-body text-xs text-muted-foreground mt-0.5">{n.mensaje}</p>
-                <p className="font-body text-[10px] text-muted-foreground/70 mt-1">{new Date(n.created_at).toLocaleString("es-CO", { dateStyle: "medium", timeStyle: "short" })}</p>
-              </div>
-              <button onClick={(e) => eliminar(e, n.id)} className="p-1.5 rounded-md bg-muted text-muted-foreground hover:text-destructive" title="Eliminar">
-                <X className="w-4 h-4" />
+          {notifs.map((n) => {
+            const iconMap: Record<string, { icon: any; color: string }> = {
+              comentario_abogado: { icon: MessageSquare, color: "bg-indigo-100 text-indigo-600" },
+              documento_abogado:  { icon: FileText,      color: "bg-emerald-100 text-emerald-600" },
+              documento_recibido: { icon: FileText,      color: "bg-sky-100 text-sky-600" },
+              solicitud_contacto: { icon: Phone,         color: "bg-amber-100 text-amber-600" },
+              termino_vencido:    { icon: Clock,         color: "bg-rose-100 text-rose-600" },
+              comentario:         { icon: MessageSquare, color: "bg-violet-100 text-violet-600" },
+            };
+            const meta = iconMap[n.tipo] ?? { icon: Bell, color: "bg-muted text-muted-foreground" };
+            const Icon = meta.icon;
+            return (
+              <button key={n.id} onClick={() => onClick(n)} className={`text-left bg-card rounded-xl border p-4 flex items-center gap-4 hover:border-accent/30 transition-all ${n.leida ? "border-border opacity-60" : "border-accent/30 shadow-sm"}`}>
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${meta.color}`}>
+                  <Icon className="w-4 h-4" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <p className="font-body text-sm font-semibold text-foreground">{n.titulo}</p>
+                    {!n.leida && <span className="w-2 h-2 rounded-full bg-accent flex-shrink-0" />}
+                  </div>
+                  <p className="font-body text-xs text-muted-foreground mt-0.5 line-clamp-2">{n.mensaje}</p>
+                  <p className="font-body text-[10px] text-muted-foreground/60 mt-1">{new Date(n.created_at).toLocaleString("es-CO", { dateStyle: "medium", timeStyle: "short" })}</p>
+                </div>
+                <button onClick={(e) => eliminar(e, n.id)} className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-destructive transition-colors flex-shrink-0" title="Eliminar">
+                  <X className="w-4 h-4" />
+                </button>
               </button>
-            </button>
-          ))}
+            );
+          })}
         </div>
       )}
     </>
