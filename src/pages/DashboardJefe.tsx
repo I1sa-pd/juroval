@@ -1889,22 +1889,7 @@ const SeccionCalendarioJefe = () => {
       });
     });
 
-   // 4. Comentarios recientes de abogados
-    (coms ?? []).forEach((c: any) => {
-      const caso = casosMap[c.case_id];
-      if (!caso) return;
-      evs.push({
-        id: "com-" + c.id,
-        fecha: c.created_at.split("T")[0],
-        hora: new Date(c.created_at).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit", hour12: false }),
-        titulo: `Comentario: "${c.texto.slice(0, 60)}${c.texto.length > 60 ? "…" : ""}"`,
-        tipo: "comentario",
-        radicado: caso.radicado,
-        tipoCaso: caso.tipo,
-        cliente: caso.cliente_nombre,
-        abogado_id: c.author_id,
-      });
-    });
+  
 
     evs.sort((a, b) => a.fecha.localeCompare(b.fecha) || a.hora.localeCompare(b.hora));
     setEventos(evs);
@@ -1933,7 +1918,7 @@ const SeccionCalendarioJefe = () => {
     documento:   { dot: "bg-amber-500",  badge: "bg-amber-100 text-amber-700", card: "border-amber-200 bg-amber-50/60", icon: "📄", label: "Entrega de doc." },
     termino:     { dot: "bg-violet-500", badge: "bg-violet-100 text-violet-700",card: "border-violet-200 bg-violet-50/60",icon: "⚖️",label: "Término" },
     vencimiento: { dot: "bg-red-500",    badge: "bg-red-100 text-red-700",     card: "border-red-200 bg-red-50/60",     icon: "⏰", label: "Vencimiento" },
-    comentario:  { dot: "bg-violet-400", badge: "bg-violet-100 text-violet-700", card: "border-violet-200 bg-violet-50/40", icon: "💬", label: "Comentario" },
+    
   };
 
   const EventoCard = ({ ev }: { ev: any }) => {
@@ -2017,7 +2002,6 @@ const SeccionCalendarioJefe = () => {
               { id: "documento", label: `📄 Entregas (${conteo("documento")})` },
               { id: "termino", label: `⚖️ Términos (${conteo("termino")})` },
               { id: "vencimiento", label: `⏰ Vencimientos (${conteo("vencimiento")})` },
-              { id: "comentario", label: `💬 Comentarios (${conteoComentarios})` },
             ].map(f => (
               <button key={f.id} type="button" onClick={() => { setFiltro(f.id); setDiaSeleccionado(null); }}
                 className={`font-body text-xs px-3 py-1.5 rounded-full border transition-colors ${filtro === f.id ? "border-accent bg-accent/10 text-foreground font-medium" : "border-border text-muted-foreground hover:border-accent/40"}`}>
@@ -2549,7 +2533,6 @@ const SeccionComentariosJefe = () => {
   const load = async () => {
     setLoading(true);
     const [{ data: coms }, { data: casosData }, { data: profs }] = await Promise.all([
-      supabase.from("case_comments").select("id, texto, author_id, abogado_id, case_id, created_at").order("created_at", { ascending: false }),
       supabase.from("cases").select("id, radicado, cliente_nombre, abogado_id").neq("etapa", "Cerrado"),
       supabase.from("profiles").select("id, full_name"),
     ]);
@@ -2566,7 +2549,7 @@ const SeccionComentariosJefe = () => {
 
   useEffect(() => { load(); }, []);
 
-  const enviar = async () => {
+const enviar = async () => {
     if (!nuevo.trim() || !casoId || !user) return;
     setSaving(true);
     const caso = casos.find(c => c.id === casoId);
@@ -2576,15 +2559,7 @@ const SeccionComentariosJefe = () => {
       abogado_id: caso?.abogado_id ?? null,
       texto: nuevo.trim(),
     });
-    if (!error && caso?.abogado_id) {
-      await supabase.from("notificaciones").insert({
-        user_id: caso.abogado_id,
-        case_id: casoId,
-        tipo: "comentario",
-        titulo: "Nuevo comentario del director",
-        mensaje: `El director dejó un comentario en el caso #${caso.radicado}: "${nuevo.trim().slice(0, 80)}${nuevo.length > 80 ? "…" : ""}"`,
-      });
-    }
+    // El trigger trg_notif_comment notifica al abogado automáticamente
     if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); }
     else { toast({ title: "Comentario enviado" }); setNuevo(""); }
     setSaving(false);
@@ -2694,12 +2669,12 @@ const SeccionNotificacionesJefe = ({ setActiveSection }: { setActiveSection: (s:
 
   const onClick = async (n: typeof notifs[number]) => {
     if (!n.leida) await supabase.from("notificaciones").update({ leida: true }).eq("id", n.id);
-   if (n.tipo === "solicitud_contacto") setActiveSection("solicitudes");
+    if (n.tipo === "solicitud_contacto") setActiveSection("solicitudes");
     else if (n.tipo === "documento_recibido" || n.tipo === "documento_abogado") setActiveSection("documentos");
-    else if (n.tipo === "comentario_abogado") setActiveSection("comentarios");
-    else if (n.tipo === "caso_devuelto_log") setActiveSection("revision");
+    else if (n.tipo === "comentario" || n.tipo === "comentario_abogado") setActiveSection("comentarios");
     else if (n.tipo === "audiencia_creada") setActiveSection("calendario");
-    else if (n.case_id || n.tipo.startsWith("caso") || n.tipo === "actuacion_creada") setActiveSection("revision");
+    else if (n.tipo === "caso_devuelto_log") setActiveSection("revision");
+    else if (n.case_id || n.tipo.startsWith("caso") || n.tipo === "actuacion_creada" || n.tipo === "termino_vencido") setActiveSection("revision");
     load();
   };
 
@@ -2743,6 +2718,9 @@ const SeccionNotificacionesJefe = ({ setActiveSection }: { setActiveSection: (s:
               solicitud_contacto: { icon: Phone,         color: "bg-amber-100 text-amber-600" },
               termino_vencido:    { icon: Clock,         color: "bg-rose-100 text-rose-600" },
               comentario:         { icon: MessageSquare, color: "bg-violet-100 text-violet-600" },
+              recordatorio_audiencia:   { icon: CalendarDays, color: "bg-blue-100 text-blue-600" },
+              recordatorio_vencimiento: { icon: Clock,        color: "bg-rose-100 text-rose-600" },
+              recordatorio_actuacion:   { icon: AlertTriangle, color: "bg-amber-100 text-amber-600" },
             };
             const meta = iconMap[n.tipo] ?? { icon: Bell, color: "bg-muted text-muted-foreground" };
             const Icon = meta.icon;
@@ -3089,13 +3067,13 @@ const SeccionSolicitudes = () => {
   };
 
   useEffect(() => { load(); }, []);
-
-  const marcarAtendida = async (id: string, atendido: boolean) => {
-    const { error } = await (supabase as any).from("contact_requests").update({ atendido }).eq("id", id);
+  const marcarAtendida = async (id: string, leido: boolean) => {
+    const { error } = await (supabase as any).from("contact_requests").update({ leido }).eq("id", id);
     if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
-    toast({ title: atendido ? "Marcada como leída" : "Marcada como pendiente" });
+    toast({ title: leido ? "Marcada como atendida" : "Marcada como pendiente" });
     load();
   };
+
 
   const filtradas = solicitudes.filter(s => {
     if (filtro === "pendientes") return !s.leido;
@@ -3178,7 +3156,7 @@ const SeccionSolicitudes = () => {
                 </div>
                 {/* Acción */}
                 <Button type="button" size="sm" variant="outline"
-                  onClick={() => marcarAtendida(s.id, !s.atendido)}
+                 onClick={() => marcarAtendida(s.id, !s.leido)}
                   className={`flex-shrink-0 font-body text-xs gap-1.5 ${s.atendido ? "" : "border-accent/30 text-accent hover:bg-accent/10"}`}>
                   <CheckSquare className="w-3.5 h-3.5" />
                   {s.leido ? "Reabrir" : "Marcar atendida"}

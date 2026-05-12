@@ -124,18 +124,7 @@ const DashboardCliente = () => {
       texto: nuevoComentario.trim(),
     });
     if (!error) {
-      // Notificar al abogado y al director
-      const notifs = [];
-      if (casoActivo.abogado_id) {
-        notifs.push(supabase.from("notificaciones").insert({
-          user_id: casoActivo.abogado_id,
-          case_id: casoActivo.id,
-          tipo: "comentario",
-          titulo: "Mensaje del cliente",
-          mensaje: `El cliente ${perfil?.full_name ?? ""} escribió sobre el caso #${casoActivo.radicado}: "${nuevoComentario.trim().slice(0, 80)}..."`,
-        }));
-      }
-      await Promise.all(notifs);
+      
       setNuevoComentario("");
       load();
     } else {
