@@ -58,7 +58,6 @@ const menuItems = [
   { id: "analitica", icon: BarChart3, label: "Analítica y KPIs" },
   { id: "notificaciones", icon: Bell, label: "Notificaciones" },
   { id: "solicitudes", icon: Phone, label: "Solicitudes de Contacto" },
-  { id: "configuracion", icon: Settings, label: "Configuración" },
 ];
 
 const DashboardJefe = () => {
@@ -170,7 +169,6 @@ const DashboardJefe = () => {
           {activeSection === "analitica" && <SeccionAnaliticaJefe />}
           {activeSection === "notificaciones" && <SeccionNotificacionesJefe setActiveSection={handleSetSection} />}
           {activeSection === "solicitudes" && <SeccionSolicitudes />}
-          {activeSection === "configuracion" && <SeccionConfiguracion />}
         </div>
       </main>
     </div>
@@ -2980,27 +2978,6 @@ const SeccionNotificacionesJefe = ({ setActiveSection }: { setActiveSection: (s:
 };
 
 
-/* ── Configuración ── */
-const SeccionConfiguracion = () => (
-  <>
-    <SectionHeader title="Configuración" description="Ajustes generales del sistema, roles y permisos" />
-    <div className="grid gap-4">
-      {[
-        { label: "Notificaciones por correo", desc: "Enviar alertas de vencimientos y casos a abogados y clientes" },
-        { label: "Registro de actividades", desc: "Historial de quién accedió o modificó información" },
-        { label: "Políticas de confidencialidad", desc: "Gestión de acceso controlado por rol" },
-      ].map((cfg) => (
-        <div key={cfg.label} className="bg-card rounded-xl border border-border p-5 flex items-center justify-between">
-          <div>
-            <p className="font-display text-base font-semibold text-foreground">{cfg.label}</p>
-            <p className="font-body text-xs text-muted-foreground mt-1">{cfg.desc}</p>
-          </div>
-          <Button variant="outline" size="sm" className="font-body text-xs">Configurar</Button>
-        </div>
-      ))}
-    </div>
-  </>
-);
 
 
 /* ── Inicio / Resumen del Director ── */
@@ -3278,40 +3255,120 @@ const SeccionInicio = ({ onNavigate }: { onNavigate: (s: string) => void }) => {
   );
 };
 
-
 const SeccionSolicitudes = () => {
   const { toast } = useToast();
   const [solicitudes, setSolicitudes] = useState<any[]>([]);
+  const [abogados, setAbogados] = useState<{ id: string; full_name: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [filtro, setFiltro] = useState<"todas" | "pendientes" | "atendidas">("pendientes");
+  const [seleccionada, setSeleccionada] = useState<any | null>(null);
+  const [abogadoAsignado, setAbogadoAsignado] = useState("");
+  const [comentario, setComentario] = useState("");
+  const [guardando, setGuardando] = useState(false);
 
   const load = async () => {
     setLoading(true);
-    const { data, error } = await (supabase as any)
-      .from("contact_requests")
-      .select("id, nombre, email, telefono, motivo, leido, created_at")
-      .order("created_at", { ascending: false });
-    if (error) toast({ title: "Error al cargar", description: error.message, variant: "destructive" });
+    const [{ data }, { data: roles }] = await Promise.all([
+      (supabase as any)
+        .from("contact_requests")
+        .select("id, nombre, email, telefono, motivo, mensaje, leido, atendido, comentario, abogado_asignado_id, created_at")
+        .order("created_at", { ascending: false }),
+      supabase.from("user_roles").select("user_id").eq("role", "abogado"),
+    ]);
     setSolicitudes(data ?? []);
+
+    const ids = (roles ?? []).map((r: any) => r.user_id);
+    if (ids.length > 0) {
+      const { data: perfiles } = await supabase.from("profiles").select("id, full_name").in("id", ids);
+      setAbogados((perfiles ?? []) as any);
+    }
     setLoading(false);
   };
 
   useEffect(() => { load(); }, []);
-  const marcarAtendida = async (id: string, leido: boolean) => {
-    const { error } = await (supabase as any).from("contact_requests").update({ leido }).eq("id", id);
-    if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
-    toast({ title: leido ? "Marcada como atendida" : "Marcada como pendiente" });
+
+  const abrirDetalle = (s: any) => {
+    setSeleccionada(s);
+    setAbogadoAsignado(s.abogado_asignado_id ?? "");
+    setComentario(s.comentario ?? "");
+  };
+
+  const cerrarDetalle = () => {
+    setSeleccionada(null);
+    setAbogadoAsignado("");
+    setComentario("");
+  };
+
+  const guardarAsignacion = async () => {
+    if (!seleccionada) return;
+    if (!abogadoAsignado || abogadoAsignado === "sin_asignar") {
+      toast({ title: "Selecciona un abogado", description: "Debes asignar un abogado para enviar el mensaje.", variant: "destructive" });
+      return;
+    }
+    setGuardando(true);
+
+    const { error } = await (supabase as any)
+      .from("contact_requests")
+      .update({
+        abogado_asignado_id: abogadoAsignado,
+        comentario: comentario.trim() || null,
+        leido: true,
+        atendido: true,
+      })
+      .eq("id", seleccionada.id);
+
+    if (error) {
+      setGuardando(false);
+      toast({ title: "Error al guardar", description: error.message, variant: "destructive" });
+      return;
+    }
+
+    if (comentario.trim()) {
+      await supabase.from("notificaciones").insert({
+        user_id: abogadoAsignado,
+        tipo: "solicitud_contacto",
+        titulo: `Nueva solicitud asignada: ${seleccionada.nombre}`,
+        mensaje: comentario.trim(),
+        metadata: {
+          solicitud_id: seleccionada.id,
+          cliente_nombre: seleccionada.nombre,
+          cliente_email: seleccionada.email,
+          cliente_telefono: seleccionada.telefono,
+          motivo: seleccionada.motivo,
+        },
+      });
+    }
+
+    setGuardando(false);
+    toast({ title: "Solicitud asignada", description: "Mensaje enviado al abogado." });
+    cerrarDetalle();
     load();
   };
 
+  const marcarAtendida = async (id: string, atendido: boolean) => {
+    const { error } = await (supabase as any).from("contact_requests").update({ atendido, leido: atendido }).eq("id", id);
+    if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
+    toast({ title: atendido ? "Marcada como atendida" : "Marcada como pendiente" });
+    load();
+  };
 
   const filtradas = solicitudes.filter(s => {
-    if (filtro === "pendientes") return !s.leido;
-    if (filtro === "atendidas") return s.leido;
+    if (filtro === "pendientes") return !s.atendido;
+    if (filtro === "atendidas") return s.atendido;
     return true;
   });
 
-  const pendientes = solicitudes.filter(s => !s.leido).length;
+  const pendientes = solicitudes.filter(s => !s.atendido).length;
+  const nombreAbogado = (id: string) => abogados.find(a => a.id === id)?.full_name ?? "Sin asignar";
+
+  const MOTIVOS: Record<string, string> = {
+    consulta: "Consulta general",
+    seguimiento: "Seguimiento de caso",
+    informacion: "Solicitar información",
+    disciplinario: "Proceso disciplinario",
+    penal: "Proceso penal",
+    administrativo: "Derecho administrativo",
+  };
 
   return (
     <>
@@ -3320,11 +3377,10 @@ const SeccionSolicitudes = () => {
         description="Personas que solicitaron una llamada desde la página web"
       />
 
-      {/* Filtros */}
       <div className="flex gap-2 mb-5">
         {([
           { id: "pendientes", label: `Pendientes (${pendientes})` },
-          { id: "atendidas", label: `Atendidas (${solicitudes.filter(s => s.leido).length})` },
+          { id: "atendidas", label: `Atendidas (${solicitudes.filter(s => s.atendido).length})` },
           { id: "todas", label: `Todas (${solicitudes.length})` },
         ] as const).map(f => (
           <button key={f.id} type="button" onClick={() => setFiltro(f.id)}
@@ -3334,70 +3390,140 @@ const SeccionSolicitudes = () => {
         ))}
       </div>
 
-      {loading ? (
-        <p className="font-body text-sm text-muted-foreground">Cargando solicitudes…</p>
-      ) : filtradas.length === 0 ? (
-        <div className="bg-card rounded-xl border border-border p-10 text-center">
-          <Phone className="w-10 h-10 text-muted-foreground/40 mx-auto mb-3" />
-          <p className="font-body text-sm text-muted-foreground">
-            {filtro === "pendientes" ? "No hay solicitudes pendientes." : "No hay solicitudes en esta categoría."}
-          </p>
-        </div>
-      ) : (
-        <div className="grid gap-3">
-          {filtradas.map(s => (
-            <div key={s.id} className={`bg-card rounded-xl border p-5 transition-all ${!s.leido ? "border-accent/20" : "border-border opacity-70"}`}>
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex items-start gap-4 flex-1 min-w-0">
-                  {/* Avatar */}
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 font-display font-bold text-base ${!s.leido ? "bg-accent/15 text-accent" : "bg-muted text-muted-foreground"}`}>
-                    {s.nombre?.charAt(0)?.toUpperCase() ?? "?"}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="font-display text-sm font-semibold text-foreground">{s.nombre}</p>
-                      {!s.leido && <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-body font-medium">Pendiente</span>}
+      <div className={`flex gap-5 ${seleccionada ? "items-start" : ""}`}>
+        <div className={`flex-1 min-w-0 ${seleccionada ? "max-w-sm" : ""}`}>
+          {loading ? (
+            <p className="font-body text-sm text-muted-foreground">Cargando solicitudes…</p>
+          ) : filtradas.length === 0 ? (
+            <div className="bg-card rounded-xl border border-border p-10 text-center">
+              <Phone className="w-10 h-10 text-muted-foreground/40 mx-auto mb-3" />
+              <p className="font-body text-sm text-muted-foreground">
+                {filtro === "pendientes" ? "No hay solicitudes pendientes." : "No hay solicitudes en esta categoría."}
+              </p>
+            </div>
+          ) : (
+            <div className="grid gap-3">
+              {filtradas.map(s => (
+                <div
+                  key={s.id}
+                  onClick={() => abrirDetalle(s)}
+                  className={`bg-card rounded-xl border p-4 cursor-pointer transition-all hover:border-accent/40 ${seleccionada?.id === s.id ? "border-accent ring-1 ring-accent/20" : !s.atendido ? "border-accent/20" : "border-border opacity-70"}`}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 font-display font-bold text-sm ${!s.atendido ? "bg-accent/15 text-accent" : "bg-muted text-muted-foreground"}`}>
+                      {s.nombre?.charAt(0)?.toUpperCase() ?? "?"}
                     </div>
-                    {/* Contacto */}
-                    <div className="flex items-center gap-4 mt-1 flex-wrap">
-                      {s.email && (
-                        <a href={`mailto:${s.email}`} className="flex items-center gap-1 font-body text-xs text-accent hover:underline">
-                          <Mail className="w-3 h-3" />
-                          {s.email}
-                        </a>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="font-display text-sm font-semibold text-foreground truncate">{s.nombre}</p>
+                        {!s.atendido && <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-body font-medium shrink-0">Pendiente</span>}
+                        {s.atendido && <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-body font-medium shrink-0">Atendida</span>}
+                      </div>
+                      <p className="font-body text-xs text-muted-foreground truncate">{MOTIVOS[s.motivo] ?? s.motivo}</p>
+                      {s.abogado_asignado_id && (
+                        <p className="font-body text-[10px] text-accent mt-0.5">→ {nombreAbogado(s.abogado_asignado_id)}</p>
                       )}
-                      {s.telefono && (
-                        <a href={`tel:${s.telefono}`} className="flex items-center gap-1 font-body text-xs text-accent hover:underline">
-                          <Phone className="w-3 h-3" />
-                          {s.telefono}
-                        </a>
-                      )}
-                    </div>
-                    {/* Motivo / mensaje */}
-                    {s.motivo && (
-                      <p className="font-body text-xs text-muted-foreground mt-2 bg-muted/40 rounded-lg px-3 py-2">
-                        {s.motivo}
+                      <p className="font-body text-[10px] text-muted-foreground/60 mt-1">
+                        {new Date(s.created_at).toLocaleString("es-CO", { dateStyle: "medium", timeStyle: "short" })}
                       </p>
-                    )}
-                    <p className="font-body text-[10px] text-muted-foreground/60 mt-2">
-                      {new Date(s.created_at).toLocaleString("es-CO", { dateStyle: "long", timeStyle: "short" })}
-                    </p>
+                    </div>
                   </div>
                 </div>
-                {/* Acción */}
-                <Button type="button" size="sm" variant="outline"
-                 onClick={() => marcarAtendida(s.id, !s.leido)}
-                  className={`flex-shrink-0 font-body text-xs gap-1.5 ${s.atendido ? "" : "border-accent/30 text-accent hover:bg-accent/10"}`}>
-                  <CheckSquare className="w-3.5 h-3.5" />
-                  {s.leido ? "Reabrir" : "Marcar atendida"}
-                </Button>
-              </div>
+              ))}
             </div>
-          ))}
+          )}
         </div>
-      )}
+
+        {seleccionada && (
+          <div className="w-96 flex-shrink-0 bg-card border border-border rounded-xl p-6 sticky top-4">
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="font-display text-base font-bold text-foreground">Detalle de solicitud</h3>
+              <button type="button" onClick={cerrarDetalle} className="text-muted-foreground hover:text-foreground transition-colors">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="bg-muted/30 rounded-lg p-4 mb-5 space-y-2">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-full bg-accent/15 text-accent flex items-center justify-center font-display font-bold text-sm">
+                  {seleccionada.nombre?.charAt(0)?.toUpperCase()}
+                </div>
+                <p className="font-display text-sm font-semibold text-foreground">{seleccionada.nombre}</p>
+              </div>
+              <a href={`mailto:${seleccionada.email}`} className="flex items-center gap-2 font-body text-xs text-accent hover:underline">
+                <Mail className="w-3.5 h-3.5" /> {seleccionada.email}
+              </a>
+              <a href={`tel:${seleccionada.telefono}`} className="flex items-center gap-2 font-body text-xs text-accent hover:underline">
+                <Phone className="w-3.5 h-3.5" /> {seleccionada.telefono}
+              </a>
+              <div className="pt-1 border-t border-border">
+                <p className="font-body text-[10px] text-muted-foreground uppercase tracking-wide mb-0.5">Motivo</p>
+                <p className="font-body text-xs text-foreground">{MOTIVOS[seleccionada.motivo] ?? seleccionada.motivo}</p>
+              </div>
+              {seleccionada.mensaje && (
+                <div className="pt-1 border-t border-border">
+                  <p className="font-body text-[10px] text-muted-foreground uppercase tracking-wide mb-0.5">Mensaje</p>
+                  <p className="font-body text-xs text-foreground">{seleccionada.mensaje}</p>
+                </div>
+              )}
+              <p className="font-body text-[10px] text-muted-foreground/60 pt-1">
+                {new Date(seleccionada.created_at).toLocaleString("es-CO", { dateStyle: "long", timeStyle: "short" })}
+              </p>
+            </div>
+
+            <div className="mb-4">
+              <Label className="font-body text-sm text-foreground mb-1.5 block">Asignar abogado</Label>
+              <Select value={abogadoAsignado} onValueChange={setAbogadoAsignado}>
+                <SelectTrigger className="font-body text-sm">
+                  <SelectValue placeholder="Seleccionar abogado…" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="sin_asignar">Sin asignar</SelectItem>
+                  {abogados.map(a => (
+                    <SelectItem key={a.id} value={a.id}>{a.full_name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="mb-5">
+              <Label className="font-body text-sm text-foreground mb-1.5 block">Mensaje para el abogado</Label>
+              <Textarea
+                value={comentario}
+                onChange={e => setComentario(e.target.value)}
+                placeholder="Escribe las instrucciones o contexto para el abogado asignado…"
+                rows={3}
+                className="font-body text-sm resize-none"
+              />
+            </div>
+
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                onClick={guardarAsignacion}
+                disabled={guardando}
+                className="flex-1 font-body text-sm gap-1.5"
+              >
+                <CheckSquare className="w-3.5 h-3.5" />
+                {guardando ? "Guardando…" : "Guardar y marcar atendida"}
+              </Button>
+            </div>
+
+            {seleccionada.atendido && (
+              <button
+                type="button"
+                onClick={() => { marcarAtendida(seleccionada.id, false); cerrarDetalle(); }}
+                className="w-full mt-2 font-body text-xs text-muted-foreground hover:text-foreground transition-colors text-center"
+              >
+                Reabrir como pendiente
+              </button>
+            )}
+          </div>
+        )}
+      </div>
     </>
   );
 };
+
 
 export default DashboardJefe;

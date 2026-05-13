@@ -79,6 +79,13 @@ type Notificacion = {
   mensaje: string;
   leida: boolean;
   created_at: string;
+  metadata?: {
+    solicitud_id?: string;
+    cliente_nombre?: string;
+    cliente_email?: string;
+    cliente_telefono?: string;
+    motivo?: string;
+  };
 };
 
 const menuItems = [
@@ -920,28 +927,45 @@ const SeccionNotificaciones = ({ notificaciones, casos, onOpenCase, onChanged }:
           {notificaciones.map((n) => (
             <div key={n.id} onClick={() => onClick(n)} className={`cursor-pointer bg-card rounded-xl border p-4 flex items-start gap-4 hover:border-accent/30 transition-all ${n.leida ? "border-border opacity-70" : "border-accent/30 bg-accent/5"}`}>
               {/* Ícono por tipo */}
-              <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
-                n.tipo === "documento_recibido" ? "bg-blue-100" :
-                n.tipo === "comentario" ? "bg-violet-100" :
-                n.tipo === "termino_vencido" ? "bg-red-100" :
-                "bg-accent/10"
-              }`}>
-                {n.tipo === "documento_recibido" ? <FileText className="w-5 h-5 text-blue-600" /> :
-                 n.tipo === "comentario" ? <MessageSquare className="w-5 h-5 text-violet-600" /> :
-                 n.tipo === "termino_vencido" ? <AlertTriangle className="w-5 h-5 text-red-600" /> :
-                 <Bell className="w-5 h-5 text-accent" />}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-0.5">
-                  {!n.leida && <span className="w-2 h-2 rounded-full bg-accent flex-shrink-0" />}
-                  <p className="font-body text-sm font-semibold text-foreground">{n.titulo}</p>
-                </div>
-                <p className="font-body text-xs text-muted-foreground leading-relaxed">{n.mensaje}</p>
-                <p className="font-body text-[10px] text-muted-foreground/70 mt-1.5">{new Date(n.created_at).toLocaleString("es-CO", { dateStyle: "medium", timeStyle: "short" })}</p>
-              </div>
-              <button onClick={(e) => { e.stopPropagation(); eliminar(e, n); }} className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-destructive transition-colors flex-shrink-0" title="Eliminar">
-                <Trash2 className="w-4 h-4" />
-              </button>
+             <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
+  n.tipo === "documento_recibido" ? "bg-blue-100" :
+  n.tipo === "comentario" ? "bg-violet-100" :
+  n.tipo === "termino_vencido" ? "bg-red-100" :
+  n.tipo === "solicitud_contacto" ? "bg-amber-100" :
+  "bg-accent/10"
+}`}>
+  {n.tipo === "documento_recibido" ? <FileText className="w-5 h-5 text-blue-600" /> :
+   n.tipo === "comentario" ? <MessageSquare className="w-5 h-5 text-violet-600" /> :
+   n.tipo === "termino_vencido" ? <AlertTriangle className="w-5 h-5 text-red-600" /> :
+   n.tipo === "solicitud_contacto" ? <Phone className="w-5 h-5 text-amber-600" /> :
+   <Bell className="w-5 h-5 text-accent" />}
+</div>
+<div className="flex-1 min-w-0">
+  <div className="flex items-center gap-2 mb-0.5">
+    {!n.leida && <span className="w-2 h-2 rounded-full bg-accent flex-shrink-0" />}
+    <p className="font-body text-sm font-semibold text-foreground">{n.titulo}</p>
+    {n.tipo === "solicitud_contacto" && (
+      <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-body font-medium shrink-0">Solicitud de contacto</span>
+    )}
+  </div>
+  <p className="font-body text-xs text-muted-foreground leading-relaxed">{n.mensaje}</p>
+  {n.tipo === "solicitud_contacto" && n.metadata && (
+    <div className="mt-2 bg-muted/40 rounded-lg px-3 py-2 space-y-1">
+      {n.metadata.cliente_nombre && <p className="font-body text-xs text-foreground font-medium">{n.metadata.cliente_nombre}</p>}
+      {n.metadata.cliente_email && (
+        <a href={`mailto:${n.metadata.cliente_email}`} className="flex items-center gap-1 font-body text-xs text-accent hover:underline">
+          <Mail className="w-3 h-3" /> {n.metadata.cliente_email}
+        </a>
+      )}
+      {n.metadata.cliente_telefono && (
+        <a href={`tel:${n.metadata.cliente_telefono}`} className="flex items-center gap-1 font-body text-xs text-accent hover:underline">
+          <Phone className="w-3 h-3" /> {n.metadata.cliente_telefono}
+        </a>
+      )}
+    </div>
+  )}
+  <p className="font-body text-[10px] text-muted-foreground/70 mt-1.5">{new Date(n.created_at).toLocaleString("es-CO", { dateStyle: "medium", timeStyle: "short" })}</p>
+</div>
             </div>
           ))}
         </div>
