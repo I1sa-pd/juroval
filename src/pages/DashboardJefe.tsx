@@ -257,11 +257,20 @@ const SeccionRevision = () => {
 
   useEffect(() => { load(); }, []);
 
-  const aprobar = async (caso: RevCaso) => {
+ const aprobar = async (caso: RevCaso) => {
     const idx = etapas.indexOf(caso.etapa);
     const next = etapas[Math.min(idx + 1, etapas.length - 1)];
-    const { error } = await supabase.from("cases").update({ etapa: next as any }).eq("id", caso.id);
+    const { error } = await supabase.from("cases").update({ etapa: next as any, revision_rechazada: false } as any).eq("id", caso.id);
     if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
+    if (caso.abogado_id) {
+      await supabase.from("notificaciones").insert({
+        user_id: caso.abogado_id,
+        case_id: caso.id,
+        tipo: "caso_aprobado",
+        titulo: "Caso aprobado por el director",
+        mensaje: `El director aprobó el caso #${caso.radicado} (${caso.cliente_nombre}). Avanzó a la etapa: ${next}.`,
+      });
+    }
     toast({ title: "Caso aprobado", description: `Avanzó a ${next}` });
     setExpandedCase(null);
     load();

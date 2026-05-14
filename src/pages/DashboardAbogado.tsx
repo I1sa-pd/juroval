@@ -389,6 +389,12 @@ const [savingRevision, setSavingRevision] = useState(false);
   };
 
   useEffect(() => { loadComentarios(); }, [caso.id]);
+  useEffect(() => {
+    const ch = supabase.channel(`comments-${caso.id}`)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "case_comments", filter: `case_id=eq.${caso.id}` }, () => loadComentarios())
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [caso.id]);
 
   const enviarComentario = async () => {
     if (!nuevoComentario.trim() || !user) return;
@@ -618,57 +624,6 @@ const [savingRevision, setSavingRevision] = useState(false);
         </div>
       )}
 
-      <div className="grid lg:grid-cols-2 gap-6">
-        {/* Actuaciones */}
-        <div className="bg-card rounded-xl border border-border p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="font-display text-lg font-semibold text-foreground">Actuaciones</h2>
-            <Dialog open={openActDialog} onOpenChange={setOpenActDialog}>
-              <DialogTrigger asChild><Button size="sm" variant="outline"><Plus className="w-4 h-4 mr-1" />Nueva</Button></DialogTrigger>
-              <DialogContent>
-                <DialogHeader><DialogTitle>Nueva actuación</DialogTitle></DialogHeader>
-                <div className="space-y-3">
-                  <div><Label>Tipo</Label><Input value={newAct.tipo} onChange={(e) => setNewAct({ ...newAct, tipo: e.target.value })} placeholder="Ej. Memorial, Auto, Notificación" /></div>
-                  <div><Label>Descripción</Label><Textarea value={newAct.descripcion} onChange={(e) => setNewAct({ ...newAct, descripcion: e.target.value })} /></div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div><Label>Vence el</Label><Input type="date" value={newAct.vence_at} onChange={(e) => setNewAct({ ...newAct, vence_at: e.target.value })} /></div>
-                    <div><Label>Término (días)</Label><Input type="number" value={newAct.termino_dias} onChange={(e) => setNewAct({ ...newAct, termino_dias: e.target.value })} /></div>
-                  </div>
-                  <Button onClick={crearActuacion} disabled={savingAct} className="w-full">{savingAct ? "Guardando..." : "Crear actuación"}</Button>
-                </div>
-              </DialogContent>
-            </Dialog>
-          </div>
-          {actuaciones.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Sin actuaciones registradas.</p>
-          ) : (
-            <ul className="space-y-3">
-              {actuaciones.map((a) => (
-                <li key={a.id} className="border border-border rounded-lg p-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex-1">
-                      <p className="font-body text-sm font-semibold text-foreground">{a.tipo}</p>
-                      <p className="font-body text-xs text-muted-foreground mt-0.5">{a.descripcion}</p>
-                      <div className="flex items-center gap-3 mt-2 text-[11px] text-muted-foreground">
-                        <span>Fecha: {new Date(a.fecha).toLocaleDateString("es-CO")}</span>
-                        {a.vence_at && <span>Vence: {new Date(a.vence_at).toLocaleDateString("es-CO")}</span>}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <button onClick={() => marcarCumplida(a)} className={`p-1.5 rounded-md ${a.cumplida ? "bg-accent/15 text-accent" : "bg-muted text-muted-foreground hover:text-foreground"}`} title={a.cumplida ? "Marcar pendiente" : "Marcar cumplida"}>
-                        <CheckCircle2 className="w-4 h-4" />
-                      </button>
-                      <button onClick={() => eliminarActuacion(a)} className="p-1.5 rounded-md bg-muted text-muted-foreground hover:text-destructive" title="Eliminar">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-
         {/* Audiencias */}
         <div className="bg-card rounded-xl border border-border p-5">
           <div className="flex items-center justify-between mb-4">
@@ -730,7 +685,7 @@ const [savingRevision, setSavingRevision] = useState(false);
             </ul>
           )}
         </div>
-      </div>
+      
 
       {/* Comentarios del caso */}
       <div className="bg-card rounded-xl border border-accent/20 p-5 mt-6">

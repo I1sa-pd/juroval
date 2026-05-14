@@ -233,14 +233,6 @@ const DashboardCliente = () => {
                         <p className="font-body text-sm font-medium text-foreground mt-1">{abogado}</p>
                       </div>
                     )}
-                    {casoActivo.fecha_vencimiento && (
-                      <div>
-                        <p className="font-body text-xs text-muted-foreground">Fecha de vencimiento</p>
-                        <p className="font-body text-sm font-medium text-foreground mt-1">
-                          {new Date(casoActivo.fecha_vencimiento + "T12:00:00").toLocaleDateString("es-CO", { day: "2-digit", month: "long", year: "numeric" })}
-                        </p>
-                      </div>
-                    )}
                   </div>
 
                   {/* Barra de progreso */}
