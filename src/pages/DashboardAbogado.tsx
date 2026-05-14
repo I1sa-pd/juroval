@@ -251,7 +251,8 @@ const reload = async () => {
                     documentos={[]}
                      loading={loading}
                         onChanged={reload}
-                           userId={user?.id ?? ""}
+                          userId={user?.id ?? ""}
+                           onOpenCase={(id) => setOpenCaseId(id)}
                                />
              )}
           {activeSection === "calendario" && <SeccionCalendario casos={casos} audiencias={audiencias} actuaciones={actuaciones} onOpenCase={(id) => { setActiveSection("casos"); setOpenCaseId(id); }} onChanged={reload} />}
@@ -288,7 +289,7 @@ const getEtapaColor = (etapa: string) => {
   return colores[etapa] ?? "bg-accent/10 text-accent";
 };
 
-const SeccionCasos = ({ casos, actuaciones, audiencias, documentos, loading, onChanged, userId }: {
+const SeccionCasos = ({ casos, actuaciones, audiencias, documentos, loading, onChanged, userId, onOpenCase }: {
   casos: Caso[];
   actuaciones: Actuacion[];
   audiencias: Audiencia[];
@@ -296,405 +297,60 @@ const SeccionCasos = ({ casos, actuaciones, audiencias, documentos, loading, onC
   loading: boolean;
   onChanged: () => void;
   userId: string;
+onOpenCase: (id: string) => void;
 }) => {
-  const { toast } = useToast();
-  const { user } = useAuth();
-  const [expandedCase, setExpandedCase] = useState<string | null>(null);
   const [busqueda, setBusqueda] = useState("");
-  const [filtroEtapa, setFiltroEtapa] = useState("todos");
-
-  // Revisión
-  const [openRevisionId, setOpenRevisionId] = useState<string | null>(null);
-  const [archivoRevision, setArchivoRevision] = useState<File | null>(null);
-  const [savingRevision, setSavingRevision] = useState(false);
-
-  // Actuaciones
-  const [newAct, setNewAct] = useState({ tipo: "", descripcion: "", vence_at: "", termino_dias: "" });
-  const [savingAct, setSavingAct] = useState(false);
-  const [openActCaseId, setOpenActCaseId] = useState<string | null>(null);
-
-  // Audiencias
-  const [newAud, setNewAud] = useState({ titulo: "", fecha_inicio: "", modalidad: "presencial", enlace_virtual: "", ubicacion: "" });
-  const [savingAud, setSavingAud] = useState(false);
-  const [openAudCaseId, setOpenAudCaseId] = useState<string | null>(null);
-  const [audError, setAudError] = useState("");
-
-  const conteoEtapa = etapas.reduce<Record<string, number>>((acc, et) => {
-    acc[et] = casos.filter(c => c.etapa === et).length;
-    return acc;
-  }, {});
 
   const casosFiltrados = casos.filter(c => {
-    const coincideEtapa = filtroEtapa === "todos" || c.etapa === filtroEtapa;
     const texto = busqueda.toLowerCase();
     const coincideBusqueda = !texto ||
       c.radicado.toLowerCase().includes(texto) ||
       c.cliente_nombre.toLowerCase().includes(texto) ||
       c.tipo.toLowerCase().includes(texto);
-    return coincideEtapa && coincideBusqueda;
+      return coincideBusqueda;
   });
-
-  const descargarDoc = async (d: any) => {
-    const { data, error } = await supabase.storage.from("case-documents").createSignedUrl(d.file_path, 60);
-    if (error || !data?.signedUrl) { toast({ title: "Error al descargar", variant: "destructive" }); return; }
-    window.open(data.signedUrl, "_blank");
-  };
-
-  const marcarCumplida = async (act: Actuacion) => {
-    await supabase.from("actuaciones").update({ cumplida: !act.cumplida }).eq("id", act.id);
-    onChanged();
-  };
-
-  const eliminarAudiencia = async (audId: string) => {
-    if (!confirm("¿Eliminar esta audiencia?")) return;
-    await supabase.from("audiencias").delete().eq("id", audId);
-    toast({ title: "Audiencia eliminada" });
-    onChanged();
-  };
-
-  const crearActuacion = async (caseId: string) => {
-    if (!newAct.tipo || !newAct.descripcion) { toast({ title: "Faltan datos", variant: "destructive" }); return; }
-    setSavingAct(true);
-    const { error } = await supabase.from("actuaciones").insert({
-      case_id: caseId, tipo: newAct.tipo, descripcion: newAct.descripcion,
-      vence_at: newAct.vence_at || null,
-      termino_dias: newAct.termino_dias ? Number(newAct.termino_dias) : null,
-      created_by: userId,
-    });
-    setSavingAct(false);
-    if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
-    toast({ title: "Actuación registrada" });
-    setNewAct({ tipo: "", descripcion: "", vence_at: "", termino_dias: "" });
-    setOpenActCaseId(null);
-    onChanged();
-  };
-
-  const crearAudiencia = async (caseId: string, caseAudiencias: Audiencia[]) => {
-    setAudError("");
-    if (!newAud.titulo || !newAud.fecha_inicio) { toast({ title: "Faltan datos", variant: "destructive" }); return; }
-    const tituloDup = caseAudiencias.find(a => a.titulo.toLowerCase() === newAud.titulo.toLowerCase());
-    if (tituloDup) { setAudError(`Este caso ya tiene una audiencia con el nombre "${newAud.titulo}".`); return; }
-    const fechaISO = new Date(newAud.fecha_inicio).toISOString();
-    const fechaDup = caseAudiencias.find(a => a.fecha_inicio === fechaISO);
-    if (fechaDup) { setAudError(`Ya existe una audiencia en esa fecha y hora: "${fechaDup.titulo}".`); return; }
-    setSavingAud(true);
-    const { error } = await supabase.from("audiencias").insert({
-      case_id: caseId, titulo: newAud.titulo, fecha_inicio: fechaISO,
-      modalidad: newAud.modalidad, enlace_virtual: newAud.enlace_virtual || null,
-      ubicacion: newAud.ubicacion || null, created_by: userId,
-    });
-    setSavingAud(false);
-    if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
-    toast({ title: "Audiencia agendada" });
-    setNewAud({ titulo: "", fecha_inicio: "", modalidad: "presencial", enlace_virtual: "", ubicacion: "" });
-    setOpenAudCaseId(null);
-    onChanged();
-  };
-
-  const enviarRevision = async (caso: Caso) => {
-    if (!archivoRevision) { toast({ title: "Adjunta un documento", variant: "destructive" }); return; }
-    if (!user) return;
-    setSavingRevision(true);
-    const ext = archivoRevision.name.split(".").pop();
-    const filePath = `${caso.id}/${Date.now()}_revision.${ext}`;
-    const { error: uploadError } = await supabase.storage.from("case-documents").upload(filePath, archivoRevision);
-    if (uploadError) { toast({ title: "Error al subir", description: uploadError.message, variant: "destructive" }); setSavingRevision(false); return; }
-    await supabase.from("documents").insert({
-      case_id: caso.id, uploaded_by: user.id, file_name: archivoRevision.name,
-      file_path: filePath, file_size: archivoRevision.size,
-      description: "Documento enviado a revisión", shared_with_client: false,
-    });
-    const etapaAnterior = caso.etapa;
-    await supabase.from("cases").update({ etapa: "Revisión" as any, revision_rechazada: false } as any).eq("id", caso.id);
-    const { data: jefeRoles } = await supabase.from("user_roles").select("user_id").eq("role", "jefe");
-    const jefeId = jefeRoles?.[0]?.user_id;
-    if (jefeId) {
-      await supabase.from("notificaciones").insert({
-        user_id: jefeId, case_id: caso.id, tipo: "revision_enviada",
-        titulo: "Caso enviado a revisión",
-        mensaje: `El abogado ${user.email} envió el caso #${caso.radicado} (${caso.cliente_nombre}) a revisión. Etapa: ${etapaAnterior}. Documento: ${archivoRevision.name}`,
-        metadata: { abogado_id: user.id, etapa_anterior: etapaAnterior, doc_nombre: archivoRevision.name, doc_path: filePath }
-      });
-    }
-    setSavingRevision(false);
-    setOpenRevisionId(null);
-    setArchivoRevision(null);
-    toast({ title: "Caso enviado a revisión", description: "El director ha sido notificado." });
-    onChanged();
-  };
 
   return (
     <>
-      <SectionHeader title="Gestión de Casos" description="Tus casos asignados — filtra por etapa o busca por radicado o cliente" />
-
-      {/* KPIs por etapa */}
-      {!loading && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
-          <button onClick={() => setFiltroEtapa("todos")}
-            className={`rounded-xl border p-3 text-left transition-all ${filtroEtapa === "todos" ? "border-accent bg-accent/10" : "border-border bg-card hover:border-accent/40"}`}>
-            <p className="font-body text-[10px] text-muted-foreground uppercase tracking-wider">Todos</p>
-            <p className="font-display text-2xl font-bold text-foreground mt-1">{casos.length}</p>
-          </button>
-          {etapas.filter(e => e !== "Cerrado").map(et => (
-            <button key={et} onClick={() => setFiltroEtapa(et)}
-              className={`rounded-xl border p-3 text-left transition-all ${filtroEtapa === et ? "border-accent bg-accent/10" : "border-border bg-card hover:border-accent/40"}`}>
-              <p className="font-body text-[10px] text-muted-foreground uppercase tracking-wider truncate">{et}</p>
-              <p className="font-display text-2xl font-bold text-foreground mt-1">{conteoEtapa[et] ?? 0}</p>
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Búsqueda */}
-      <div className="mb-4">
-        <Input placeholder="Buscar por radicado, cliente o tipo…" value={busqueda} onChange={e => setBusqueda(e.target.value)} className="max-w-md" />
+      <SectionHeader title="Gestión de Casos" description="Tus casos asignados" />
+      <div className="mb-4 flex gap-3 flex-wrap">
+        <Input placeholder="Buscar por radicado, cliente o tipo…" value={busqueda} onChange={e => setBusqueda(e.target.value)} className="max-w-sm" />
       </div>
-
       {loading ? (
         <p className="font-body text-sm text-muted-foreground">Cargando casos...</p>
       ) : casosFiltrados.length === 0 ? (
         <div className="bg-card rounded-xl border border-border p-10 text-center">
           <Briefcase className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
-          <p className="font-body text-sm text-muted-foreground">{casos.length === 0 ? "Sin casos asignados." : "Ningún caso coincide con el filtro."}</p>
+          <p className="font-body text-sm text-muted-foreground">{casos.length === 0 ? "Sin casos asignados." : "Ningún caso coincide."}</p>
         </div>
       ) : (
-        <div className="grid gap-4">
-          {casosFiltrados.map((caso) => {
-            const idx = etapas.indexOf(caso.etapa);
-            const cActs = actuaciones.filter(a => a.case_id === caso.id);
-            const cAuds = audiencias.filter(a => a.case_id === caso.id);
-            const cDocs = documentos.filter(d => d.case_id === caso.id);
-            const esExpandido = expandedCase === caso.id;
-            const proxAud = cAuds.find(a => new Date(a.fecha_inicio) >= new Date());
-            const actVencidas = cActs.filter(a => !a.cumplida && a.vence_at && new Date(a.vence_at) < new Date());
-
-            return (
-              <div key={caso.id} className={`bg-card rounded-xl border overflow-hidden transition-all ${caso.urgente ? "border-destructive/40" : "border-border"}`}>
-                <button onClick={() => setExpandedCase(esExpandido ? null : caso.id)}
-                  className="w-full p-5 flex items-center justify-between hover:bg-muted/30 transition-colors">
-                  <div className="flex items-center gap-4 flex-1 min-w-0">
-                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${caso.urgente ? "bg-destructive/10" : "gradient-navy"}`}>
-                      <FileText className={`w-4 h-4 ${caso.urgente ? "text-destructive" : "text-accent"}`} />
-                    </div>
-                    <div className="text-left min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        {(caso as any).revision_rechazada && (
-                          <span className="text-[10px] font-body px-2 py-0.5 rounded-full bg-destructive/10 text-destructive font-medium flex items-center gap-1">
-                            <AlertTriangle className="w-3 h-3" /> Falta revisión
-                          </span>
-                        )}
-                        <p className="font-display text-base font-semibold text-foreground">#{caso.radicado}</p>
-                        {caso.urgente && <span className="text-[10px] font-body px-2 py-0.5 rounded-full bg-destructive/10 text-destructive font-semibold">URGENTE</span>}
-                      </div>
-                      <p className="font-body text-xs text-muted-foreground truncate">{caso.cliente_nombre} · {caso.tipo}</p>
-                      <div className="flex items-center gap-3 mt-1 flex-wrap">
-                        {proxAud && (
-                          <span className="font-body text-[10px] text-muted-foreground flex items-center gap-1">
-                            <CalendarDays className="w-3 h-3" />
-                            {new Date(proxAud.fecha_inicio).toLocaleDateString("es-CO", { day: "2-digit", month: "short" })}
-                          </span>
-                        )}
-                        {actVencidas.length > 0 && (
-                          <span className="font-body text-[10px] text-destructive flex items-center gap-1">
-                            <AlertTriangle className="w-3 h-3" />
-                            {actVencidas.length} actuación{actVencidas.length > 1 ? "es" : ""} vencida{actVencidas.length > 1 ? "s" : ""}
-                          </span>
-                        )}
-                        {caso.fecha_vencimiento && (
-                          <span className="font-body text-[10px] text-muted-foreground flex items-center gap-1">
-                            <Clock className="w-3 h-3" />
-                            Vence {new Date(caso.fecha_vencimiento).toLocaleDateString("es-CO", { day: "2-digit", month: "short", year: "numeric" })}
-                          </span>
-                        )}
-                      </div>
-                    </div>
+        <div className="grid gap-3">
+          {casosFiltrados.map(caso => (
+            <div key={caso.id} className={`bg-card rounded-xl border p-5 flex items-center justify-between gap-4 ${caso.urgente ? "border-destructive/30" : "border-border"}`}>
+              <div className="flex items-center gap-4 flex-1 min-w-0">
+                <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${caso.urgente ? "bg-destructive/10" : "gradient-navy"}`}>
+                  <FileText className={`w-4 h-4 ${caso.urgente ? "text-destructive" : "text-accent"}`} />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="font-display text-sm font-semibold text-foreground">#{caso.radicado}</p>
+                    {caso.urgente && <span className="text-[10px] font-body px-2 py-0.5 rounded-full bg-destructive/10 text-destructive font-semibold">URGENTE</span>}
+                    {(caso as any).revision_rechazada && <span className="text-[10px] font-body px-2 py-0.5 rounded-full bg-destructive/10 text-destructive font-medium flex items-center gap-1"><AlertTriangle className="w-3 h-3" />Devuelto</span>}
+                    <span className={`text-[11px] font-body px-2.5 py-0.5 rounded-full font-medium ${getEtapaColor(caso.etapa)}`}>{caso.etapa}</span>
                   </div>
-                  <div className="flex items-center gap-3 flex-shrink-0 ml-2">
-                    <span className={`text-[11px] font-body px-3 py-1 rounded-full font-medium ${getEtapaColor(caso.etapa)}`}>{caso.etapa}</span>
-                    <ChevronRight className={`w-4 h-4 text-muted-foreground transition-transform ${esExpandido ? "rotate-90" : ""}`} />
-                  </div>
-                </button>
-
-                {esExpandido && (
-                  <div className="px-5 pb-5 border-t border-border pt-4 space-y-5">
-
-                    {/* Progreso */}
-                    <div>
-                      <p className="font-body text-[10px] text-muted-foreground mb-2 uppercase tracking-wider">Progreso del caso</p>
-                      <div className="flex items-center gap-1 flex-wrap">
-                        {etapas.map((et, i) => (
-                          <div key={et} className="flex items-center gap-1">
-                            <div className={`px-2.5 py-1 rounded-md text-[10px] font-body font-medium ${
-                              i < idx ? "bg-accent/20 text-accent" :
-                              i === idx ? "bg-accent text-primary-foreground" :
-                              "bg-muted text-muted-foreground"
-                            }`}>{et}</div>
-                            {i < etapas.length - 1 && <ChevronRight className="w-3 h-3 text-muted-foreground" />}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Observaciones */}
-                    {caso.observaciones && (
-                      <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-                        <p className="font-body text-[10px] uppercase tracking-wider text-amber-700 mb-1">Observaciones del director</p>
-                        <p className="font-body text-xs text-amber-900 whitespace-pre-line">{caso.observaciones}</p>
-                      </div>
-                    )}
-
-                    {/* Actuaciones y Audiencias */}
-                    <div className="grid md:grid-cols-2 gap-4">
-                      <div className="border border-border rounded-lg p-3">
-                        <div className="flex items-center justify-between mb-2">
-                          <p className="font-display text-sm font-semibold text-foreground">
-                            Actuaciones ({cActs.length})
-                            {actVencidas.length > 0 && <span className="ml-2 text-[10px] text-destructive font-body">· {actVencidas.length} vencida(s)</span>}
-                          </p>
-                          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setOpenActCaseId(caso.id)}>
-                            <Plus className="w-3 h-3 mr-1" />Nueva
-                          </Button>
-                        </div>
-                        {openActCaseId === caso.id && (
-                          <div className="bg-muted/30 rounded-lg p-3 mb-3 space-y-2">
-                            <Input placeholder="Tipo (ej. Memorial, Auto)" value={newAct.tipo} onChange={e => setNewAct({ ...newAct, tipo: e.target.value })} className="text-xs h-8" />
-                            <Textarea placeholder="Descripción" value={newAct.descripcion} onChange={e => setNewAct({ ...newAct, descripcion: e.target.value })} className="text-xs min-h-[60px] resize-none" />
-                            <div className="grid grid-cols-2 gap-2">
-                              <Input type="date" value={newAct.vence_at} onChange={e => setNewAct({ ...newAct, vence_at: e.target.value })} className="text-xs h-8" />
-                              <Input type="number" placeholder="Días" value={newAct.termino_dias} onChange={e => setNewAct({ ...newAct, termino_dias: e.target.value })} className="text-xs h-8" />
-                            </div>
-                            <div className="flex gap-2">
-                              <Button size="sm" onClick={() => crearActuacion(caso.id)} disabled={savingAct} className="flex-1 h-7 text-xs">{savingAct ? "Guardando..." : "Guardar"}</Button>
-                              <Button size="sm" variant="outline" onClick={() => setOpenActCaseId(null)} className="h-7 text-xs">Cancelar</Button>
-                            </div>
-                          </div>
-                        )}
-                        {cActs.length === 0 ? <p className="text-xs text-muted-foreground">Sin actuaciones registradas.</p> : (
-                          <ul className="space-y-2 max-h-48 overflow-auto">
-                            {cActs.map(a => (
-                              <li key={a.id} className={`text-xs p-2 rounded-md ${!a.cumplida && a.vence_at && new Date(a.vence_at) < new Date() ? "bg-destructive/5 border border-destructive/20" : "bg-muted/30"}`}>
-                                <div className="flex items-center justify-between">
-                                  <p className="font-medium text-foreground">{a.tipo}</p>
-                                  <button onClick={() => marcarCumplida(a)} className={`text-[10px] px-1.5 py-0.5 rounded ${a.cumplida ? "text-accent" : "text-muted-foreground hover:text-accent"}`}>
-                                    {a.cumplida ? "✓ Cumplida" : "Marcar cumplida"}
-                                  </button>
-                                </div>
-                                <p className="text-muted-foreground">{a.descripcion}</p>
-                                <p className="text-[10px] text-muted-foreground/70 mt-0.5">
-                                  {new Date(a.fecha).toLocaleDateString("es-CO")}
-                                  {a.vence_at ? ` · vence ${new Date(a.vence_at).toLocaleDateString("es-CO")}` : ""}
-                                </p>
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                      </div>
-
-                      <div className="border border-border rounded-lg p-3">
-                        <div className="flex items-center justify-between mb-2">
-                          <p className="font-display text-sm font-semibold text-foreground">Audiencias ({cAuds.length})</p>
-                          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => { setOpenAudCaseId(caso.id); setAudError(""); }}>
-                            <Plus className="w-3 h-3 mr-1" />Agendar
-                          </Button>
-                        </div>
-                        {openAudCaseId === caso.id && (
-                          <div className="bg-muted/30 rounded-lg p-3 mb-3 space-y-2">
-                            {audError && <p className="text-[10px] text-destructive">{audError}</p>}
-                            <Input placeholder="Título" value={newAud.titulo} onChange={e => setNewAud({ ...newAud, titulo: e.target.value })} className="text-xs h-8" />
-                            <Input type="datetime-local" value={newAud.fecha_inicio} onChange={e => setNewAud({ ...newAud, fecha_inicio: e.target.value })} className="text-xs h-8" />
-                            <Select value={newAud.modalidad} onValueChange={v => setNewAud({ ...newAud, modalidad: v })}>
-                              <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="presencial">Presencial</SelectItem>
-                                <SelectItem value="virtual">Virtual</SelectItem>
-                                <SelectItem value="mixta">Mixta</SelectItem>
-                              </SelectContent>
-                            </Select>
-                            {newAud.modalidad !== "presencial" && <Input placeholder="Enlace virtual" value={newAud.enlace_virtual} onChange={e => setNewAud({ ...newAud, enlace_virtual: e.target.value })} className="text-xs h-8" />}
-                            {newAud.modalidad !== "virtual" && <Input placeholder="Ubicación" value={newAud.ubicacion} onChange={e => setNewAud({ ...newAud, ubicacion: e.target.value })} className="text-xs h-8" />}
-                            <div className="flex gap-2">
-                              <Button size="sm" onClick={() => crearAudiencia(caso.id, cAuds)} disabled={savingAud} className="flex-1 h-7 text-xs">{savingAud ? "Guardando..." : "Guardar"}</Button>
-                              <Button size="sm" variant="outline" onClick={() => setOpenAudCaseId(null)} className="h-7 text-xs">Cancelar</Button>
-                            </div>
-                          </div>
-                        )}
-                        {cAuds.length === 0 ? <p className="text-xs text-muted-foreground">Sin audiencias programadas.</p> : (
-                          <ul className="space-y-2 max-h-48 overflow-auto">
-                            {cAuds.map(a => (
-                              <li key={a.id} className="text-xs p-2 rounded-md bg-muted/30">
-                                <div className="flex items-center justify-between">
-                                  <p className="font-medium text-foreground">{a.titulo}</p>
-                                  <button onClick={() => eliminarAudiencia(a.id)} className="text-[10px] text-muted-foreground hover:text-destructive">Eliminar</button>
-                                </div>
-                                <p className="text-muted-foreground">
-                                  {new Date(a.fecha_inicio).toLocaleString("es-CO", { dateStyle: "medium", timeStyle: "short" })}
-                                  {a.modalidad ? ` · ${a.modalidad}` : ""}
-                                </p>
-                                {a.enlace_virtual && <a href={a.enlace_virtual} target="_blank" rel="noopener" className="text-accent underline text-[10px]">Abrir enlace</a>}
-                                {a.ubicacion && <p className="text-[10px] text-muted-foreground/70">{a.ubicacion}</p>}
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Documentos */}
-                    <div className="border border-border rounded-lg p-3">
-                      <p className="font-display text-sm font-semibold text-foreground mb-2">Documentos ({cDocs.length})</p>
-                      {cDocs.length === 0 ? <p className="text-xs text-muted-foreground">Sin documentos adjuntos.</p> : (
-                        <ul className="grid gap-2 max-h-40 overflow-auto">
-                          {cDocs.map(d => (
-                            <li key={d.id} className="flex items-center justify-between text-xs bg-muted/30 rounded-md px-3 py-2">
-                              <span className="truncate text-foreground">{d.file_name}</span>
-                              <Button size="sm" variant="outline" className="h-7 text-xs ml-2 flex-shrink-0" onClick={() => descargarDoc(d)}>Descargar</Button>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-
-                    {/* Enviar a Revisión */}
-                    <div className="border-t border-border pt-4">
-                      {(caso as any).revision_rechazada && (
-                        <div className="flex items-center gap-2 mb-3 bg-destructive/10 border border-destructive/30 rounded-lg px-3 py-2">
-                          <AlertTriangle className="w-4 h-4 text-destructive flex-shrink-0" />
-                          <p className="font-body text-xs text-destructive">El director devolvió este caso. Corrígelo y vuelve a enviarlo a revisión.</p>
-                        </div>
-                      )}
-                      {openRevisionId === caso.id ? (
-                        <div className="bg-muted/30 rounded-lg p-4 space-y-3">
-                          <p className="font-body text-sm font-semibold text-foreground">Enviar a revisión — Etapa actual: <span className="text-accent">{caso.etapa}</span></p>
-                          <div>
-                            <Label className="font-body text-xs mb-1 block">Documento adjunto <span className="text-destructive">*</span></Label>
-                            <input type="file" accept=".pdf,.doc,.docx,.jpg,.png"
-                              onChange={e => setArchivoRevision(e.target.files?.[0] ?? null)}
-                              className="w-full text-xs font-body text-muted-foreground file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-accent/10 file:text-accent file:text-xs hover:file:bg-accent/20 cursor-pointer" />
-                            {archivoRevision && <p className="font-body text-[10px] text-accent mt-1">✓ {archivoRevision.name}</p>}
-                          </div>
-                          <div className="flex gap-2">
-                            <Button size="sm" onClick={() => enviarRevision(caso)} disabled={savingRevision || !archivoRevision} className="gradient-gold text-primary border-0 font-body font-semibold flex-1">
-                              {savingRevision ? "Enviando…" : "Confirmar envío"}
-                            </Button>
-                            <Button size="sm" variant="outline" onClick={() => { setOpenRevisionId(null); setArchivoRevision(null); }}>Cancelar</Button>
-                          </div>
-                        </div>
-                      ) : (
-                        <Button
-                          onClick={() => setOpenRevisionId(caso.id)}
-                          disabled={caso.etapa === "Revisión"}
-                          className="gradient-gold text-primary border-0 font-body font-semibold shadow-gold hover:opacity-90 gap-2"
-                        >
-                          <Upload className="w-4 h-4" />
-                          {caso.etapa === "Revisión" ? "En revisión…" : "Enviar a Revisión"}
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                )}
+                  <p className="font-body text-xs text-muted-foreground truncate mt-0.5">{caso.cliente_nombre} · {caso.tipo}</p>
+                  {caso.fecha_vencimiento && (
+                    <p className="font-body text-[10px] text-muted-foreground flex items-center gap-1 mt-1">
+                      <Clock className="w-3 h-3" /> Vence {new Date(caso.fecha_vencimiento).toLocaleDateString("es-CO")}
+                    </p>
+                  )}
+                </div>
               </div>
-            );
-          })}
+              <Button size="sm" onClick={() => onOpenCase(caso.id)} className="shrink-0 font-body text-xs">
+                Ver detalle
+              </Button>
+            </div>
+          ))}
         </div>
       )}
     </>
@@ -1509,12 +1165,27 @@ const SeccionNotificaciones = ({ notificaciones, casos, onOpenCase, onChanged }:
 
 /* ── Clientes ── */
 const SeccionClientes = ({ casos }: { casos: Caso[] }) => {
-  const map = new Map<string, { nombre: string; casos: number }>();
+  const [expandido, setExpandido] = useState<string | null>(null);
+  const [perfiles, setPerfiles] = useState<Record<string, any>>({});
+
+  useEffect(() => {
+    const ids = [...new Set(casos.map(c => (c as any).cliente_id).filter(Boolean))];
+    if (ids.length === 0) return;
+    supabase.from("profiles").select("id, full_name, email, phone, cedula").in("id", ids)
+      .then(({ data }) => {
+        const m: Record<string, any> = {};
+        (data ?? []).forEach((p: any) => { m[p.id] = p; });
+        setPerfiles(m);
+      });
+  }, [casos]);
+
+  const map = new Map<string, Caso[]>();
   casos.forEach(c => {
-    const cur = map.get(c.cliente_nombre) ?? { nombre: c.cliente_nombre, casos: 0 };
-    cur.casos += 1; map.set(c.cliente_nombre, cur);
+    const lista = map.get(c.cliente_nombre) ?? [];
+    lista.push(c);
+    map.set(c.cliente_nombre, lista);
   });
-  const clientes = Array.from(map.values());
+  const clientes = Array.from(map.entries());
 
   return (
     <>
@@ -1523,15 +1194,84 @@ const SeccionClientes = ({ casos }: { casos: Caso[] }) => {
         <p className="text-sm text-muted-foreground">Aún no tienes clientes asignados.</p>
       ) : (
         <div className="grid gap-4">
-          {clientes.map((c) => (
-            <div key={c.nombre} className="bg-card rounded-xl border border-border p-5 flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className="w-10 h-10 rounded-full bg-accent/10 flex items-center justify-center"><Users className="w-4 h-4 text-accent" /></div>
-                <p className="font-display text-base font-semibold text-foreground">{c.nombre}</p>
+          {clientes.map(([nombre, casosCli]) => {
+            const perfil = perfiles[(casosCli[0] as any).cliente_id] ?? null;
+            return (
+              <div key={nombre} className="bg-card rounded-xl border border-border overflow-hidden">
+                <button type="button" onClick={() => setExpandido(expandido === nombre ? null : nombre)}
+                  className="w-full p-5 flex items-center justify-between hover:bg-muted/30 transition-colors">
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 rounded-full bg-accent/15 flex items-center justify-center font-display font-bold text-accent">
+                      {nombre.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="text-left">
+                      <p className="font-display text-base font-semibold text-foreground">{nombre}</p>
+                      <p className="font-body text-xs text-muted-foreground">{casosCli.length} caso(s)</p>
+                    </div>
+                  </div>
+                  <ChevronRight className={`w-4 h-4 text-muted-foreground transition-transform ${expandido === nombre ? "rotate-90" : ""}`} />
+                </button>
+
+                {expandido === nombre && (
+                  <div className="border-t border-border px-5 pb-5 pt-4 space-y-5">
+
+                    {/* Info del cliente */}
+                    <div className="bg-muted/30 rounded-lg p-4 space-y-2">
+                      <p className="font-body text-[10px] text-muted-foreground uppercase tracking-wide mb-2">Información del cliente</p>
+                      <p className="font-display text-sm font-semibold text-foreground">{nombre}</p>
+                      {perfil?.cedula && (
+                        <p className="font-body text-xs text-muted-foreground">Cédula: <span className="text-foreground font-medium">{perfil.cedula}</span></p>
+                      )}
+                      {perfil?.email && (
+                        <a href={`mailto:${perfil.email}`} className="flex items-center gap-1.5 font-body text-xs text-accent hover:underline">
+                          <Mail className="w-3.5 h-3.5" /> {perfil.email}
+                        </a>
+                      )}
+                      {perfil?.phone && (
+                        <a href={`tel:${perfil.phone}`} className="flex items-center gap-1.5 font-body text-xs text-accent hover:underline">
+                          <Phone className="w-3.5 h-3.5" /> {perfil.phone}
+                        </a>
+                      )}
+                      {!perfil && (
+                        <p className="font-body text-xs text-muted-foreground italic">Sin información de contacto registrada.</p>
+                      )}
+                    </div>
+
+                    {/* Casos del cliente */}
+                    <div className="space-y-3">
+                      <p className="font-body text-[10px] text-muted-foreground uppercase tracking-wide">Casos</p>
+                      {casosCli.map(c => (
+                        <div key={c.id} className={`rounded-lg border p-4 ${c.urgente ? "border-destructive/30 bg-destructive/5" : "border-border"}`}>
+                          <div className="flex items-start justify-between gap-3 flex-wrap mb-2">
+                            <div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <p className="font-display text-sm font-semibold text-foreground">#{c.radicado}</p>
+                                {c.urgente && <span className="text-[10px] px-2 py-0.5 rounded-full bg-destructive/10 text-destructive font-body font-medium">Urgente</span>}
+                                <span className={`text-[10px] px-2.5 py-0.5 rounded-full font-body font-medium ${getEtapaColor(c.etapa)}`}>{c.etapa}</span>
+                              </div>
+                              <p className="font-body text-xs text-muted-foreground mt-0.5">{c.tipo}</p>
+                            </div>
+                            {c.fecha_vencimiento && (
+                              <div className="text-right shrink-0">
+                                <p className="font-body text-[10px] text-muted-foreground">Vencimiento</p>
+                                <p className="font-body text-xs font-medium text-foreground">{new Date(c.fecha_vencimiento).toLocaleDateString("es-CO")}</p>
+                              </div>
+                            )}
+                          </div>
+                          {c.observaciones && (
+                            <div className="mt-2 pt-2 border-t border-border">
+                              <p className="font-body text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Observaciones del director</p>
+                              <p className="font-body text-xs text-foreground whitespace-pre-line">{c.observaciones}</p>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
-              <span className="font-body text-xs px-3 py-1 rounded-full bg-accent/10 text-accent">{c.casos} caso(s)</span>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </>
