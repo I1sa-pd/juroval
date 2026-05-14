@@ -17,7 +17,7 @@ const DashboardCliente = () => {
   const { signOut, user } = useAuth();
   const { toast } = useToast();
 
-  const [perfil, setPerfil] = useState<{ full_name: string } | null>(null);
+  const [perfil, setPerfil] = useState<{ full_name: string; email: string | null; phone: string | null; cedula: string | null; direccion: string | null } | null>(null);
   const [casos, setCasos] = useState<any[]>([]);
   const [casoActivo, setCasoActivo] = useState<any | null>(null);
   const [abogado, setAbogado] = useState<string>("");
@@ -36,7 +36,7 @@ const DashboardCliente = () => {
     // Perfil del cliente
     const { data: prof } = await supabase
       .from("profiles")
-      .select("full_name")
+      .select("full_name, email, phone, cedula, direccion")
       .eq("id", user.id)
       .maybeSingle();
     if (prof) setPerfil(prof as any);
@@ -388,6 +388,38 @@ const DashboardCliente = () => {
                         <Send className="w-4 h-4" />
                       </Button>
                     </div>
+                  </div>
+                </div>
+
+                {/* Mi información personal (solo lectura) */}
+                <div>
+                  <h2 className="font-display text-base font-semibold text-foreground mb-3">Mi información personal</h2>
+                  <div className="bg-card rounded-xl border border-border p-5">
+                    <div className="grid sm:grid-cols-2 gap-4">
+                      <div>
+                        <p className="font-body text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Nombre completo</p>
+                        <p className="font-body text-sm font-medium text-foreground">{perfil?.full_name || "—"}</p>
+                      </div>
+                      <div>
+                        <p className="font-body text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Cédula</p>
+                        <p className="font-body text-sm font-medium text-foreground">{perfil?.cedula || "—"}</p>
+                      </div>
+                      <div>
+                        <p className="font-body text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Correo electrónico</p>
+                        <p className="font-body text-sm font-medium text-foreground break-all">{perfil?.email || user?.email || "—"}</p>
+                      </div>
+                      <div>
+                        <p className="font-body text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Celular</p>
+                        <p className="font-body text-sm font-medium text-foreground">{perfil?.phone || "—"}</p>
+                      </div>
+                      <div className="sm:col-span-2">
+                        <p className="font-body text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Dirección física</p>
+                        <p className="font-body text-sm font-medium text-foreground">{perfil?.direccion || "—"}</p>
+                      </div>
+                    </div>
+                    <p className="font-body text-xs text-muted-foreground mt-4 pt-4 border-t border-border">
+                      ℹ️ Si necesitas actualizar algún dato, comunícate con tu equipo jurídico.
+                    </p>
                   </div>
                 </div>
               </>

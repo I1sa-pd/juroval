@@ -19,6 +19,8 @@ const ContactSection = () => {
     motivo: "",
     telefono: "",
     mensaje: "",
+    cedula: "",
+    direccion: "",
   });
   const [loading, setLoading] = useState(false);
   const [enviado, setEnviado] = useState(false);
@@ -33,6 +35,8 @@ const ContactSection = () => {
       telefono: form.telefono.trim(),
       motivo: form.motivo,
       mensaje: form.mensaje.trim() || null,
+      cedula: form.cedula.trim() || null,
+      direccion: form.direccion.trim() || null,
     });
 
     if (error) {
@@ -62,7 +66,7 @@ const ContactSection = () => {
 
     setLoading(false);
     setEnviado(true);
-    setForm({ nombre: "", email: "", motivo: "", telefono: "", mensaje: "" });
+    setForm({ nombre: "", email: "", motivo: "", telefono: "", mensaje: "", cedula: "", direccion: "" });
     setTimeout(() => setEnviado(false), 6000);
   };
 
@@ -138,6 +142,20 @@ const ContactSection = () => {
               rows={3}
               {...field("mensaje")}
               className={inputClass + " resize-none"}
+            />
+            <input
+              type="text"
+              placeholder="Cédula de ciudadanía"
+              required
+              {...field("cedula")}
+              className={inputClass}
+            />
+            <input
+              type="text"
+              placeholder="Dirección física (ciudad, barrio, calle)"
+              required
+              {...field("direccion")}
+              className={inputClass}
             />
             <button
               type="submit"

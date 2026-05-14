@@ -16,6 +16,7 @@ import {
   Menu,
   X,
   ChevronRight,
+  ChevronDown,
   Check,
   XCircle,
   MessageSquare,
@@ -597,6 +598,9 @@ const SeccionAsignacion = () => {
   // Datos de selects
   const [abogados, setAbogados] = useState<{ id: string; full_name: string; area_id: string | null }[]>([]);
   const [clientes, setClientes] = useState<{ id: string; full_name: string; email: string; cedula: string | null }[]>([]);
+  const [solicitudes, setSolicitudes] = useState<{ id: string; nombre: string; email: string; telefono: string; cedula: string | null; direccion: string | null; motivo: string; created_at: string }[]>([]);
+  const [generatedPassword, setGeneratedPassword] = useState<string>("");
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [areas, setAreas] = useState<{ id: string; nombre: string }[]>([]);
   const [tiposProceso, setTiposProceso] = useState<{ id: string; nombre: string; area_id: string | null }[]>([]);
   const [juzgados, setJuzgados] = useState<{ id: string; nombre: string; ciudad: string | null }[]>([]);
@@ -623,10 +627,12 @@ const SeccionAsignacion = () => {
     });
   };
 
-  // Form nuevo caso — persiste en sessionStorage
-  const defaultForm = {
+ const defaultForm = {
     radicado: "", tipo: "", area_nombre: "", tipo_proceso_nombre: "",
     cliente_id: "", cliente_nombre: "", cliente_externo: false,
+    cliente_email: "", cliente_cedula: "", cliente_telefono: "", cliente_direccion: "",
+    cliente_origen: "" as "" | "registrado" | "solicitud" | "externo",
+    solicitud_id: "",
     juzgado: "", abogado_id: "", observaciones: "", fecha_vencimiento: "", urgente: false,
   };
   const [form, setFormRaw] = useState<typeof defaultForm>(() => {
@@ -643,10 +649,11 @@ const SeccionAsignacion = () => {
     });
   };
 
-  const load = async () => {
+ const load = async () => {
     const [
       { data: roleAbogado }, { data: roleCliente },
-      { data: aData }, { data: tData }, { data: jData }, { data: casData }
+      { data: aData }, { data: tData }, { data: jData }, { data: casData },
+      { data: solData },
     ] = await Promise.all([
       supabase.from("user_roles").select("user_id").eq("role", "abogado"),
       supabase.from("user_roles").select("user_id").eq("role", "cliente"),
@@ -654,6 +661,7 @@ const SeccionAsignacion = () => {
       supabase.from("tipos_proceso").select("id, nombre, area_id").order("nombre"),
       supabase.from("juzgados").select("id, nombre, ciudad").order("nombre"),
       supabase.from("cases").select("id, radicado, cliente_nombre, cliente_id, tipo, etapa, abogado_id, urgente, fecha_vencimiento, observaciones, created_at").neq("etapa", "Cerrado").order("created_at", { ascending: false }),
+      supabase.from("contact_requests").select("id, nombre, email, telefono, cedula, direccion, motivo, created_at").order("created_at", { ascending: false }),
     ]);
 
     const abIds = (roleAbogado ?? []).map(r => r.user_id);
@@ -670,6 +678,7 @@ const SeccionAsignacion = () => {
     setTiposProceso(tData ?? []);
     setJuzgados(jData ?? []);
     setCasosExistentes(casData ?? []);
+    setSolicitudes((solData ?? []) as any);
   };
 
   useEffect(() => { load(); }, []);
@@ -707,7 +716,7 @@ const SeccionAsignacion = () => {
     { label: "Confirmar" },
   ];
 
-  const handleSubmit = async () => {
+    const handleSubmit = async () => {
     if (!user) return;
     if (!form.radicado.trim() || !form.tipo.trim() || !form.cliente_nombre.trim()) {
       toast({ title: "Faltan datos", description: "Radicado, tipo y cliente son obligatorios", variant: "destructive" });
@@ -717,9 +726,49 @@ const SeccionAsignacion = () => {
       toast({ title: "Radicado duplicado", description: "Ya existe un caso con ese número", variant: "destructive" });
       setPaso(0); return;
     }
+    // Si es externo o solicitud, exigir email para crear la cuenta
+    const necesitaCrearCuenta = (form.cliente_origen === "externo" || form.cliente_origen === "solicitud") && !form.cliente_id;
+    if (necesitaCrearCuenta) {
+      if (!form.cliente_email.trim()) {
+        toast({ title: "Falta email", description: "El email es obligatorio para crear la cuenta del cliente", variant: "destructive" });
+        setPaso(0); return;
+      }
+    }
     if (!form.abogado_id) {
       toast({ title: "Sin abogado asignado", description: "¿Seguro? El caso quedará sin responsable hasta que lo asignes.", variant: "default" });
     }
+
+    setSubmitting(true);
+
+    // Crear cuenta de cliente si es externo o solicitud
+    let clienteIdFinal = form.cliente_id;
+    let passwordGenerada = "";
+    if (necesitaCrearCuenta) {
+      passwordGenerada = `Jrv-${Math.random().toString(36).slice(2, 8)}-${Math.floor(Math.random() * 9000) + 1000}`;
+      const { data: createData, error: createErr } = await supabase.functions.invoke("create-abogado", {
+        body: {
+          full_name: form.cliente_nombre.trim(),
+          email: form.cliente_email.trim(),
+          password: passwordGenerada,
+          phone: form.cliente_telefono.trim() || null,
+          cedula: form.cliente_cedula.trim() || null,
+          direccion: form.cliente_direccion.trim() || null,
+          role: "cliente",
+        },
+      });
+      if (createErr || (createData as any)?.error) {
+        setSubmitting(false);
+        toast({ title: "No se pudo crear el cliente", description: (createData as any)?.error ?? createErr?.message ?? "Error desconocido", variant: "destructive" });
+        return;
+      }
+      clienteIdFinal = (createData as any).user_id;
+
+      // Si vino de una solicitud, marcarla como atendida
+      if (form.cliente_origen === "solicitud" && form.solicitud_id) {
+        await supabase.from("contact_requests").update({ atendido: true, abogado_asignado_id: form.abogado_id || null }).eq("id", form.solicitud_id);
+      }
+    }
+
     // Armar observaciones con los términos si se llenaron
     const terminosTexto = etapas
       .filter(et => terminos[et])
@@ -730,12 +779,11 @@ const SeccionAsignacion = () => {
       form.observaciones.trim(),
     ].filter(Boolean).join("\n\n");
 
-    setSubmitting(true);
     const { error } = await supabase.from("cases").insert({
       radicado: form.radicado.trim(),
       tipo: form.tipo.trim(),
       cliente_nombre: form.cliente_nombre.trim(),
-      cliente_id: form.cliente_id || null,
+      cliente_id: clienteIdFinal || null,
       juzgado: form.juzgado || null,
       abogado_id: form.abogado_id || null,
       observaciones: obsCompleta || null,
@@ -748,6 +796,13 @@ const SeccionAsignacion = () => {
       toast({ title: "Error al crear el caso", description: error.message, variant: "destructive" });
       return;
     }
+
+    // Mostrar password generada al director
+    if (passwordGenerada) {
+      setGeneratedPassword(passwordGenerada);
+      setShowPasswordModal(true);
+    }
+
     toast({ title: "✓ Caso asignado", description: `Radicado ${form.radicado} creado correctamente.` });
     sessionStorage.removeItem("asig_form");
     sessionStorage.removeItem("asig_terminos");
@@ -890,54 +945,161 @@ const SeccionAsignacion = () => {
                 <h3 className="font-display text-lg font-semibold">Vincular Cliente</h3>
                 <div className="flex gap-3 mb-4">
                   <button type="button"
-                    onClick={() => setForm({ ...form, cliente_externo: false, cliente_id: "", cliente_nombre: "" })}
+                    onClick={() => setForm({ ...form, cliente_externo: false, cliente_id: "", cliente_nombre: "", cliente_email: "", cliente_cedula: "", cliente_telefono: "", cliente_direccion: "", cliente_origen: "", solicitud_id: "" })}
                     className={`flex-1 p-3 rounded-xl border text-sm font-body transition-colors ${!form.cliente_externo ? "border-accent bg-accent/5 text-foreground" : "border-border text-muted-foreground hover:border-accent/30"}`}
                   >
                     Cliente registrado en el sistema
                   </button>
                   <button type="button"
-                    onClick={() => setForm({ ...form, cliente_externo: true, cliente_id: "", cliente_nombre: "" })}
+                    onClick={() => setForm({ ...form, cliente_externo: true, cliente_id: "", cliente_nombre: "", cliente_email: "", cliente_cedula: "", cliente_telefono: "", cliente_direccion: "", cliente_origen: "externo", solicitud_id: "" })}
                     className={`flex-1 p-3 rounded-xl border text-sm font-body transition-colors ${form.cliente_externo ? "border-accent bg-accent/5 text-foreground" : "border-border text-muted-foreground hover:border-accent/30"}`}
                   >
-                    Cliente externo (sin cuenta)
+                    Cliente nuevo (sin registrar)
                   </button>
                 </div>
 
                 {!form.cliente_externo ? (
-                  clientes.length === 0 ? (
-                    <div className="bg-muted/40 rounded-lg p-4 text-center">
-                      <p className="font-body text-sm text-muted-foreground">No hay clientes registrados aún.</p>
-                      <p className="font-body text-xs text-muted-foreground mt-1">Crea uno desde "Gestión de Usuarios" para que pueda ver su caso.</p>
+                  <div className="space-y-6">
+                    {/* Sección 1: Clientes con cuenta */}
+                    <div>
+                      <h4 className="font-display text-sm font-semibold text-foreground mb-2 flex items-center gap-2">
+                        <Users className="w-4 h-4 text-accent" />
+                        Clientes con cuenta ({clientes.length})
+                      </h4>
+                      {clientes.length === 0 ? (
+                        <div className="bg-muted/40 rounded-lg p-4 text-center">
+                          <p className="font-body text-sm text-muted-foreground">No hay clientes registrados aún.</p>
+                        </div>
+                      ) : (
+                        <div className="grid gap-2 max-h-56 overflow-auto">
+                          {clientes.map(cl => (
+                            <button type="button"
+                              key={cl.id}
+                              onClick={() => setForm({ ...form, cliente_id: cl.id, cliente_nombre: cl.full_name, cliente_origen: "registrado", solicitud_id: "" })}
+                              className={`w-full text-left p-3 rounded-xl border transition-colors flex items-center gap-3 ${form.cliente_id === cl.id ? "border-accent bg-accent/5" : "border-border hover:border-accent/30"}`}
+                            >
+                              <div className="w-9 h-9 rounded-full bg-accent/10 flex items-center justify-center flex-shrink-0">
+                                <Users className="w-4 h-4 text-accent" />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="font-body text-sm font-medium text-foreground truncate">{cl.full_name}</p>
+                                <p className="font-body text-xs text-muted-foreground truncate">{cl.email}{cl.cedula ? ` · CC ${cl.cedula}` : ""}</p>
+                              </div>
+                              {form.cliente_id === cl.id && <Check className="w-4 h-4 text-accent ml-auto flex-shrink-0" />}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                  ) : (
-                    <div className="grid gap-2 max-h-72 overflow-auto">
-                      {clientes.map(cl => (
-                        <button type="button"
-                          key={cl.id}
-                          onClick={() => setForm({ ...form, cliente_id: cl.id, cliente_nombre: cl.full_name })}
-                          className={`w-full text-left p-3 rounded-xl border transition-colors flex items-center gap-3 ${form.cliente_id === cl.id ? "border-accent bg-accent/5" : "border-border hover:border-accent/30"}`}
-                        >
-                          <div className="w-9 h-9 rounded-full bg-accent/10 flex items-center justify-center flex-shrink-0">
-                            <Users className="w-4 h-4 text-accent" />
-                          </div>
-                          <div className="min-w-0">
-                            <p className="font-body text-sm font-medium text-foreground truncate">{cl.full_name}</p>
-                            <p className="font-body text-xs text-muted-foreground truncate">{cl.email}{cl.cedula ? ` · CC ${cl.cedula}` : ""}</p>
-                          </div>
-                          {form.cliente_id === cl.id && <Check className="w-4 h-4 text-accent ml-auto flex-shrink-0" />}
-                        </button>
-                      ))}
+
+                    {/* Sección 2: Solicitudes de contacto */}
+                    <div>
+                      <h4 className="font-display text-sm font-semibold text-foreground mb-2 flex items-center gap-2">
+                        <Phone className="w-4 h-4 text-accent" />
+                        Solicitudes de contacto ({solicitudes.length})
+                      </h4>
+                      {solicitudes.length === 0 ? (
+                        <div className="bg-muted/40 rounded-lg p-4 text-center">
+                          <p className="font-body text-sm text-muted-foreground">No hay solicitudes de contacto.</p>
+                        </div>
+                      ) : (
+                        <div className="grid gap-2 max-h-56 overflow-auto">
+                          {solicitudes.map(s => (
+                            <button type="button"
+                              key={s.id}
+                              onClick={() => setForm({
+                                ...form,
+                                cliente_id: "",
+                                cliente_nombre: s.nombre,
+                                cliente_email: s.email,
+                                cliente_cedula: s.cedula ?? "",
+                                cliente_telefono: s.telefono,
+                                cliente_direccion: s.direccion ?? "",
+                                cliente_origen: "solicitud",
+                                solicitud_id: s.id,
+                              })}
+                              className={`w-full text-left p-3 rounded-xl border transition-colors flex items-center gap-3 ${form.solicitud_id === s.id ? "border-accent bg-accent/5" : "border-border hover:border-accent/30"}`}
+                            >
+                              <div className="w-9 h-9 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
+                                <Phone className="w-4 h-4 text-blue-600" />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="font-body text-sm font-medium text-foreground truncate">{s.nombre}</p>
+                                <p className="font-body text-xs text-muted-foreground truncate">{s.email} · {s.telefono}</p>
+                                <p className="font-body text-[10px] text-muted-foreground/70">
+                                  Motivo: {s.motivo} · {new Date(s.created_at).toLocaleDateString("es-CO", { day: "2-digit", month: "short", year: "numeric" })}
+                                </p>
+                              </div>
+                              {form.solicitud_id === s.id && <Check className="w-4 h-4 text-accent ml-auto flex-shrink-0" />}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                  )
+
+                    {/* Si seleccionó una solicitud, mostrar campos editables (puede completar datos) */}
+                    {form.cliente_origen === "solicitud" && (
+                      <div className="bg-blue-50 rounded-xl border border-blue-200 p-4 space-y-3">
+                        <p className="font-body text-xs font-semibold text-blue-900">
+                          📝 Se creará una cuenta nueva para este cliente. Completa los datos si falta algo:
+                        </p>
+                        <div className="grid sm:grid-cols-2 gap-3">
+                          <div>
+                            <Label className="font-body text-xs">Nombre completo *</Label>
+                            <Input value={form.cliente_nombre} onChange={e => setForm({ ...form, cliente_nombre: e.target.value })} />
+                          </div>
+                          <div>
+                            <Label className="font-body text-xs">Email *</Label>
+                            <Input type="email" value={form.cliente_email} onChange={e => setForm({ ...form, cliente_email: e.target.value })} />
+                          </div>
+                          <div>
+                            <Label className="font-body text-xs">Cédula</Label>
+                            <Input value={form.cliente_cedula} onChange={e => setForm({ ...form, cliente_cedula: e.target.value })} />
+                          </div>
+                          <div>
+                            <Label className="font-body text-xs">Celular</Label>
+                            <Input value={form.cliente_telefono} onChange={e => setForm({ ...form, cliente_telefono: e.target.value })} />
+                          </div>
+                          <div className="sm:col-span-2">
+                            <Label className="font-body text-xs">Dirección física</Label>
+                            <Input value={form.cliente_direccion} onChange={e => setForm({ ...form, cliente_direccion: e.target.value })} />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 ) : (
-                  <div className="space-y-2">
-                    <Label className="font-body text-sm">Nombre del cliente *</Label>
-                    <Input value={form.cliente_nombre} onChange={e => setForm({ ...form, cliente_nombre: e.target.value })} placeholder="Nombre completo del cliente" />
-                    <p className="font-body text-xs text-muted-foreground">Este cliente no podrá ver su caso en el portal digital.</p>
+                  <div className="bg-muted/30 rounded-xl border border-border p-4 space-y-3">
+                    <p className="font-body text-xs font-semibold text-foreground">
+                      📝 Se creará una cuenta nueva para este cliente. Te mostraremos la contraseña inicial al finalizar.
+                    </p>
+                    <div className="grid sm:grid-cols-2 gap-3">
+                      <div>
+                        <Label className="font-body text-xs">Nombre completo *</Label>
+                        <Input value={form.cliente_nombre} onChange={e => setForm({ ...form, cliente_nombre: e.target.value })} placeholder="Nombre completo del cliente" />
+                      </div>
+                      <div>
+                        <Label className="font-body text-xs">Email *</Label>
+                        <Input type="email" value={form.cliente_email} onChange={e => setForm({ ...form, cliente_email: e.target.value })} placeholder="cliente@ejemplo.com" />
+                      </div>
+                      <div>
+                        <Label className="font-body text-xs">Cédula</Label>
+                        <Input value={form.cliente_cedula} onChange={e => setForm({ ...form, cliente_cedula: e.target.value })} />
+                      </div>
+                      <div>
+                        <Label className="font-body text-xs">Celular</Label>
+                        <Input value={form.cliente_telefono} onChange={e => setForm({ ...form, cliente_telefono: e.target.value })} />
+                      </div>
+                      <div className="sm:col-span-2">
+                        <Label className="font-body text-xs">Dirección física</Label>
+                        <Input value={form.cliente_direccion} onChange={e => setForm({ ...form, cliente_direccion: e.target.value })} placeholder="Ciudad, barrio, calle" />
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
             )}
+         
 
             {/* Paso 2: Abogado */}
             {paso === 2 && (
@@ -1160,6 +1322,37 @@ const SeccionAsignacion = () => {
           })}
         </div>
       )}
+      
+
+      {/* Modal de contraseña generada para cliente nuevo */}
+      <Dialog open={showPasswordModal} onOpenChange={setShowPasswordModal}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>✓ Caso creado y cuenta de cliente generada</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="font-body text-sm text-muted-foreground">
+              Entrega estos datos al cliente para que pueda ingresar al portal:
+            </p>
+            <div className="bg-muted/40 rounded-lg p-4 space-y-2">
+              <div>
+                <p className="font-body text-[10px] text-muted-foreground uppercase tracking-wider">Email</p>
+                <p className="font-body text-sm font-mono text-foreground break-all">{form.cliente_email}</p>
+              </div>
+              <div>
+                <p className="font-body text-[10px] text-muted-foreground uppercase tracking-wider">Contraseña inicial</p>
+                <p className="font-body text-sm font-mono text-foreground">{generatedPassword}</p>
+              </div>
+            </div>
+            <p className="font-body text-xs text-muted-foreground">
+              ℹ️ El cliente podrá cambiar la contraseña desde su panel después de iniciar sesión.
+            </p>
+            <Button onClick={() => { setShowPasswordModal(false); setGeneratedPassword(""); }} className="w-full gradient-gold text-primary border-0">
+              Entendido
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 };
@@ -1444,7 +1637,6 @@ const SeccionTerminosJefe = () => {
 };
 
 
-/* ── Gestión de Abogados ── */
 interface AbogadoRow {
   id: string;
   full_name: string;
@@ -1452,6 +1644,8 @@ interface AbogadoRow {
   area_id: string | null;
   area_nombre?: string | null;
   phone: string | null;
+  cedula: string | null;
+  direccion: string | null;
   last_sign_in_at: string | null;
   sign_in_count: number | null;
 }
@@ -1470,8 +1664,12 @@ const SeccionAbogados = () => {
   const [showForm, setShowForm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [createRole, setCreateRole] = useState<"abogado" | "cliente">("abogado");
-  const [form, setForm] = useState({
-    full_name: "", email: "", password: "", phone: "", cedula: "", area_id: "",
+  const [expandedCliente, setExpandedCliente] = useState<string | null>(null);
+  const [editingCliente, setEditingCliente] = useState<string | null>(null);
+  const [clienteEditForm, setClienteEditForm] = useState({ full_name: "", phone: "", cedula: "", direccion: "" });
+  const [savingCliente, setSavingCliente] = useState(false);
+ const [form, setForm] = useState({
+    full_name: "", email: "", password: "", phone: "", cedula: "", area_id: "", direccion: "",
   });
 
   const load = async () => {
@@ -1486,7 +1684,7 @@ const SeccionAbogados = () => {
         .maybeSingle();
       if (dirData) {
         setDirector(dirData as any);
-        setDirForm({ full_name: dirData.full_name ?? "", phone: (dirData as any).phone ?? "", cedula: (dirData as any).cedula ?? "" });
+        setDirForm({ full_name: dirData.full_name ?? "", phone: (dirData as any).phone ?? "", cedula: (dirData as any).cedula ?? "", direccion: (dirData as any).direccion ?? "" });
       } else {
         // El perfil del director no existe aún — crearlo
         await supabase.from("profiles").upsert({
@@ -1509,10 +1707,10 @@ const SeccionAbogados = () => {
     setAreas(aData ?? []);
     const ids = (roleRows ?? []).map((r) => r.user_id);
     if (ids.length === 0) { setAbogados([]); setClientes([]); setLoading(false); return; }
-    const { data } = await supabase
+   const { data } = await supabase
       .from("profiles")
-      .select("id, full_name, email, area_id, phone, last_sign_in_at, sign_in_count")
-      .in("id", ids);
+      .select("id, full_name, email, area_id, phone, cedula, direccion, last_sign_in_at, sign_in_count")
+      .in("id", ids); 
     const areaMap = new Map((aData ?? []).map((a) => [a.id, a.nombre]));
     const profMap = new Map(
       (data ?? []).map((p) => [p.id, { ...p, area_nombre: p.area_id ? areaMap.get(p.area_id) ?? null : null }]),
@@ -1551,7 +1749,38 @@ const SeccionAbogados = () => {
     setEditingDirector(false);
     load();
   };
+const iniciarEdicionCliente = (c: AbogadoRow) => {
+    setEditingCliente(c.id);
+    setClienteEditForm({
+      full_name: c.full_name ?? "",
+      phone: c.phone ?? "",
+      cedula: c.cedula ?? "",
+      direccion: c.direccion ?? "",
+    });
+  };
 
+  const cancelarEdicionCliente = () => {
+    setEditingCliente(null);
+    setClienteEditForm({ full_name: "", phone: "", cedula: "", direccion: "" });
+  };
+
+  const guardarCliente = async (clienteId: string) => {
+    setSavingCliente(true);
+    const { error } = await supabase.from("profiles").update({
+      full_name: clienteEditForm.full_name.trim(),
+      phone: clienteEditForm.phone.trim() || null,
+      cedula: clienteEditForm.cedula.trim() || null,
+      direccion: clienteEditForm.direccion.trim() || null,
+    }).eq("id", clienteId);
+    setSavingCliente(false);
+    if (error) {
+      toast({ title: "Error al guardar", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Cliente actualizado", description: "Los datos fueron guardados." });
+    setEditingCliente(null);
+    load();
+  };
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (form.password.length < 8) {
@@ -1563,12 +1792,13 @@ const SeccionAbogados = () => {
       return;
     }
     setSubmitting(true);
-    const payload = {
+   const payload = {
       full_name: form.full_name,
       email: form.email,
       password: form.password,
       phone: form.phone,
       cedula: form.cedula,
+      direccion: createRole === "cliente" ? form.direccion : null,
       area_id: createRole === "abogado" ? form.area_id : null,
       role: createRole,
     };
@@ -1584,7 +1814,7 @@ const SeccionAbogados = () => {
     }
     const label = createRole === "cliente" ? "Cliente" : "Abogado";
     toast({ title: `${label} creado`, description: `${form.full_name} ya puede iniciar sesión.` });
-    setForm({ full_name: "", email: "", password: "", phone: "", cedula: "", area_id: "" });
+  setForm({ full_name: "", email: "", password: "", phone: "", cedula: "", area_id: "", direccion: "" });
     setShowForm(false);
     load();
   };
@@ -1720,6 +1950,12 @@ const SeccionAbogados = () => {
               <Label>Cédula</Label>
               <Input value={form.cedula} onChange={(e) => setForm({ ...form, cedula: e.target.value })} />
             </div>
+              {createRole === "cliente" && (
+              <div className="space-y-1.5">
+                <Label>Dirección física</Label>
+                <Input value={form.direccion} onChange={(e) => setForm({ ...form, direccion: e.target.value })} placeholder="Ciudad, barrio, calle" />
+              </div>
+              )}
           </div>
           <p className="text-[11px] text-muted-foreground">
             La persona podrá cambiar esta contraseña desde su panel después de iniciar sesión.
@@ -1773,24 +2009,94 @@ const SeccionAbogados = () => {
               <div className="bg-card rounded-xl border border-border p-6 text-center">
                 <p className="font-body text-sm text-muted-foreground">Aún no hay clientes registrados.</p>
               </div>
-            ) : (
+           ) : (
               <div className="grid gap-3">
-                {clientes.map((c) => (
-                  <div key={c.id} className="bg-card rounded-xl border border-border p-4 flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-full bg-accent/10 flex items-center justify-center">
-                      <Users className="w-4 h-4 text-accent" />
+                {clientes.map((c) => {
+                  const isExpanded = expandedCliente === c.id;
+                  const isEditing = editingCliente === c.id;
+                  return (
+                    <div key={c.id} className="bg-card rounded-xl border border-border overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => !isEditing && setExpandedCliente(isExpanded ? null : c.id)}
+                        className="w-full p-4 flex items-center gap-4 hover:bg-muted/30 transition-colors text-left"
+                      >
+                        <div className="w-10 h-10 rounded-full bg-accent/10 flex items-center justify-center flex-shrink-0">
+                          <Users className="w-4 h-4 text-accent" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-display text-sm font-semibold text-foreground">{c.full_name}</p>
+                          <p className="font-body text-xs text-muted-foreground truncate">{c.email}{c.phone ? ` · ${c.phone}` : ""}</p>
+                        </div>
+                        <p className="font-body text-[11px] text-muted-foreground text-right hidden md:block">
+                          {c.last_sign_in_at
+                            ? `Último acceso: ${new Date(c.last_sign_in_at).toLocaleString("es-CO", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })}`
+                            : "Sin acceso aún"}
+                        </p>
+                        <ChevronDown className={`w-4 h-4 text-muted-foreground flex-shrink-0 transition-transform ${isExpanded ? "rotate-180" : ""}`} />
+                      </button>
+
+                      {isExpanded && (
+                        <div className="border-t border-border bg-muted/20 p-4">
+                          {isEditing ? (
+                            <div className="space-y-3">
+                              <div className="grid sm:grid-cols-2 gap-3">
+                                <div>
+                                  <Label className="font-body text-xs text-muted-foreground mb-1 block">Nombre completo</Label>
+                                  <Input value={clienteEditForm.full_name} onChange={e => setClienteEditForm(p => ({ ...p, full_name: e.target.value }))} />
+                                </div>
+                                <div>
+                                  <Label className="font-body text-xs text-muted-foreground mb-1 block">Cédula</Label>
+                                  <Input value={clienteEditForm.cedula} onChange={e => setClienteEditForm(p => ({ ...p, cedula: e.target.value }))} />
+                                </div>
+                                <div>
+                                  <Label className="font-body text-xs text-muted-foreground mb-1 block">Celular</Label>
+                                  <Input value={clienteEditForm.phone} onChange={e => setClienteEditForm(p => ({ ...p, phone: e.target.value }))} />
+                                </div>
+                                <div>
+                                  <Label className="font-body text-xs text-muted-foreground mb-1 block">Dirección</Label>
+                                  <Input value={clienteEditForm.direccion} onChange={e => setClienteEditForm(p => ({ ...p, direccion: e.target.value }))} />
+                                </div>
+                              </div>
+                              <div className="flex gap-2 pt-2">
+                                <Button type="button" size="sm" onClick={() => guardarCliente(c.id)} disabled={savingCliente} className="gradient-gold text-primary border-0 font-body text-xs">
+                                  {savingCliente ? "Guardando…" : "Guardar"}
+                                </Button>
+                                <Button type="button" size="sm" variant="outline" onClick={cancelarEdicionCliente} className="font-body text-xs">
+                                  Cancelar
+                                </Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <>
+                              <div className="grid sm:grid-cols-2 gap-3">
+                                <div>
+                                  <p className="font-body text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Cédula</p>
+                                  <p className="font-body text-sm text-foreground">{c.cedula || "—"}</p>
+                                </div>
+                                <div>
+                                  <p className="font-body text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Correo</p>
+                                  <p className="font-body text-sm text-foreground break-all">{c.email}</p>
+                                </div>
+                                <div>
+                                  <p className="font-body text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Celular</p>
+                                  <p className="font-body text-sm text-foreground">{c.phone || "—"}</p>
+                                </div>
+                                <div>
+                                  <p className="font-body text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Dirección</p>
+                                  <p className="font-body text-sm text-foreground">{c.direccion || "—"}</p>
+                                </div>
+                              </div>
+                              <Button type="button" size="sm" variant="outline" onClick={() => iniciarEdicionCliente(c)} className="font-body text-xs mt-3">
+                                Editar datos
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      )}
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-display text-sm font-semibold text-foreground">{c.full_name}</p>
-                      <p className="font-body text-xs text-muted-foreground">{c.email}{c.phone ? ` · ${c.phone}` : ""}</p>
-                    </div>
-                    <p className="font-body text-[11px] text-muted-foreground text-right">
-                      {c.last_sign_in_at
-                        ? `Último acceso: ${new Date(c.last_sign_in_at).toLocaleString("es-CO", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })}`
-                        : "Aún no ha iniciado sesión"}
-                    </p>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -1819,7 +2125,7 @@ const SeccionCalendarioJefe = () => {
   const [editAudId, setEditAudId] = useState<string | null>(null);
   const [casesAll, setCasesAll] = useState<any[]>([]);
   const [abogadosList, setAbogadosList] = useState<any[]>([]);
-  const [clientesMap, setClientesMap] = useState<Record<string, { nombre: string; email: string; telefono: string }>>({});
+  const [clientesMap, setClientesMap] = useState<Record<string, { nombre: string; email: string; telefono: string; cedula: string; direccion: string }>>({});
   const [formAud, setFormAud] = useState({
     case_id: "", titulo: "", tipo: "", fecha_inicio: "", fecha_fin: "",
     modalidad: "presencial", enlace_virtual: "", ubicacion: "", notas: "",
@@ -1843,7 +2149,7 @@ const SeccionCalendarioJefe = () => {
       supabase.from("cases").select("id, radicado, cliente_nombre, cliente_id, abogado_id, fecha_vencimiento, etapa, tipo").neq("etapa", "Cerrado"),
       supabase.from("profiles").select("id, full_name, phone, email"),
       supabase.from("user_roles").select("user_id").eq("role", "abogado"),
-      supabase.from("profiles").select("id, full_name, email, phone"),
+      supabase.from("profiles").select("id, full_name, email, phone, cedula, direccion"),
     ]);
 
     const pm: Record<string, string> = {};
@@ -1851,8 +2157,9 @@ const SeccionCalendarioJefe = () => {
     setAbogadosMap(pm);
 
     // Mapa de clientes
-    const cm: Record<string, { nombre: string; email: string; telefono: string }> = {};
-    (clProfiles ?? []).forEach((p: any) => { cm[p.id] = { nombre: p.full_name, email: p.email ?? "", telefono: p.phone ?? "" }; });
+   // Mapa de clientes
+    const cm: Record<string, { nombre: string; email: string; telefono: string; cedula: string; direccion: string }> = {};
+    (clProfiles ?? []).forEach((p: any) => { cm[p.id] = { nombre: p.full_name, email: p.email ?? "", telefono: p.phone ?? "", cedula: p.cedula ?? "", direccion: p.direccion ?? "" }; });
     setClientesMap(cm);
 
     // Abogados
@@ -2135,11 +2442,13 @@ const SeccionCalendarioJefe = () => {
                   <p className="font-body text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Abogado asignado</p>
                   <p className="font-body text-sm text-foreground font-medium">{abogadosMap[casoSeleccionado.abogado_id] ?? "Sin asignar"}</p>
                 </div>
-                <div>
+               <div>
                   <p className="font-body text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Cliente</p>
                   <p className="font-body text-sm text-foreground font-medium">{casoSeleccionado.cliente_nombre}</p>
-                  {clienteInfo?.email && <p className="font-body text-xs text-muted-foreground">{clienteInfo.email}</p>}
+                  {clienteInfo?.cedula && <p className="font-body text-xs text-muted-foreground">CC {clienteInfo.cedula}</p>}
+                  {clienteInfo?.email && <p className="font-body text-xs text-muted-foreground break-all">{clienteInfo.email}</p>}
                   {clienteInfo?.telefono && <p className="font-body text-xs text-muted-foreground">{clienteInfo.telefono}</p>}
+                  {clienteInfo?.direccion && <p className="font-body text-xs text-muted-foreground">{clienteInfo.direccion}</p>}
                 </div>
                 <div>
                   <p className="font-body text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Tipo de proceso</p>

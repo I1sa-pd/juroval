@@ -14,11 +14,11 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog";
 import {
-  Scale, Briefcase, CalendarDays, BarChart3, Upload, Bell, Users, Clock,
-  LogOut, Menu, X, ChevronRight, FileText, TrendingUp, AlertTriangle,
-  KeyRound, ArrowLeft, Plus, Video, MapPin, CheckCircle2, Trash2, Download, MessageSquare, Send,
+  Scale, Briefcase, CalendarDays, BarChart3, Bell, Users,
+  LogOut, Menu, X, ChevronLeft, ChevronRight, FileText, TrendingUp, AlertTriangle,
+  KeyRound, ArrowLeft, Plus, Video, MapPin, CheckCircle2, Trash2, MessageSquare, Send,
+  Phone, Mail,
 } from "lucide-react";
-import { GestionDocumentos } from "@/components/GestionDocumentos";
 import { RPieChart, RBarChart } from "@/components/AnalyticsCharts";
 
 const ETAPAS = ["Creación", "Proyección", "Recaudo Probatorio", "Revisión", "Firma", "Radicado", "Cerrado"] as const;
@@ -59,17 +59,6 @@ type Audiencia = {
   ubicacion: string | null;
 };
 
-type DocRow = {
-  id: string;
-  file_name: string;
-  file_path: string;
-  file_size: number | null;
-  case_id: string | null;
-  description: string | null;
-  shared_with_client: boolean;
-  created_at: string;
-  uploaded_by: string;
-};
 
 type Notificacion = {
   id: string;
@@ -90,13 +79,10 @@ type Notificacion = {
 
 const menuItems = [
   { id: "casos", icon: Briefcase, label: "Gestión de Casos" },
-  { id: "calendario", icon: CalendarDays, label: "Calendario de Audiencias" },
-  { id: "terminos", icon: Clock, label: "Control de Términos" },
-  { id: "documentos", icon: Upload, label: "Gestión Documental" },
-  { id: "analitica", icon: BarChart3, label: "Analítica y KPIs" },
+  { id: "calendario", icon: CalendarDays, label: "Calendario" },
   { id: "notificaciones", icon: Bell, label: "Notificaciones" },
   { id: "clientes", icon: Users, label: "Clientes" },
-  { id: "comentarios", icon: MessageSquare, Send, label: "Comentarios del Director" },
+  { id: "comentarios", icon: MessageSquare, label: "Comentarios del Director" },
 ];
 
 const DashboardAbogado = () => {
@@ -109,27 +95,24 @@ const DashboardAbogado = () => {
   const [casos, setCasos] = useState<Caso[]>([]);
   const [actuaciones, setActuaciones] = useState<Actuacion[]>([]);
   const [audiencias, setAudiencias] = useState<Audiencia[]>([]);
-  const [documentos, setDocumentos] = useState<DocRow[]>([]);
   const [notificaciones, setNotificaciones] = useState<Notificacion[]>([]);
   const [loading, setLoading] = useState(true);
   const [openCaseId, setOpenCaseId] = useState<string | null>(null);
 
-  const reload = async () => {
+const reload = async () => {
     if (!user) return;
     setLoading(true);
     const { data: cs } = await supabase.from("cases").select("*").eq("abogado_id", user.id).order("created_at", { ascending: false });
     const ids = (cs ?? []).map((c) => c.id);
     if (ids.length > 0) {
-      const [{ data: acts }, { data: auds }, { data: docs }] = await Promise.all([
+      const [{ data: acts }, { data: auds }] = await Promise.all([
         supabase.from("actuaciones").select("*").in("case_id", ids).order("vence_at", { ascending: true, nullsFirst: false }),
         supabase.from("audiencias").select("*").in("case_id", ids).order("fecha_inicio", { ascending: true }),
-        supabase.from("documents").select("id, file_name, file_path, file_size, case_id, description, shared_with_client, created_at, uploaded_by").in("case_id", ids).order("created_at", { ascending: false }),
       ]);
       setActuaciones((acts ?? []) as any);
       setAudiencias((auds ?? []) as any);
-      setDocumentos((docs ?? []) as any);
     } else {
-      setActuaciones([]); setAudiencias([]); setDocumentos([]);
+      setActuaciones([]); setAudiencias([]);
     }
     setCasos((cs ?? []) as any);
 
@@ -257,22 +240,13 @@ const DashboardAbogado = () => {
                   caso={openCaso}
                   actuaciones={actuaciones.filter(a => a.case_id === openCaso.id)}
                   audiencias={audiencias.filter(a => a.case_id === openCaso.id)}
-                  documentos={documentos.filter(d => d.case_id === openCaso.id)}
                   onBack={() => setOpenCaseId(null)}
                   onChanged={reload}
                   userId={user?.id ?? ""}
                 />
               : <SeccionCasos casos={casos} loading={loading} onOpen={setOpenCaseId} />
           )}
-          {activeSection === "calendario" && <SeccionCalendario casos={casos} audiencias={audiencias} onOpenCase={(id) => { setActiveSection("casos"); setOpenCaseId(id); }} onChanged={reload} />}
-          {activeSection === "terminos" && <SeccionTerminos casos={casos} actuaciones={actuaciones} onOpenCase={(id) => { setActiveSection("casos"); setOpenCaseId(id); }} onChanged={reload} />}
-          {activeSection === "documentos" && (
-            <>
-              <SectionHeader title="Gestión Documental" description="Sube y descarga documentos vinculados a tus casos." />
-              <GestionDocumentos mode="abogado" />
-            </>
-          )}
-          {activeSection === "analitica" && <SeccionAnalitica casos={casos} actuaciones={actuaciones} audiencias={audiencias} />}
+          {activeSection === "calendario" && <SeccionCalendario casos={casos} audiencias={audiencias} actuaciones={actuaciones} onOpenCase={(id) => { setActiveSection("casos"); setOpenCaseId(id); }} onChanged={reload} />}
           {activeSection === "notificaciones" && <SeccionNotificaciones notificaciones={notificaciones} casos={casos} onOpenCase={(id) => { setActiveSection("casos"); setOpenCaseId(id); }} onChanged={reload} />}
           {activeSection === "clientes" && <SeccionClientes casos={casos} />}
           {activeSection === "comentarios" && <SeccionComentariosAbogado />}
@@ -330,16 +304,9 @@ const SeccionCasos = ({ casos, loading, onOpen }: { casos: Caso[]; loading: bool
   </>
 );
 
-/* ── Detalle de Caso ── */
-const formatBytes = (n: number | null) => {
-  if (!n) return "—";
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / 1024 / 1024).toFixed(1)} MB`;
-};
 
-const CaseDetail = ({ caso, actuaciones, audiencias, documentos, onBack, onChanged, userId }: {
-  caso: Caso; actuaciones: Actuacion[]; audiencias: Audiencia[]; documentos: DocRow[];
+const CaseDetail = ({ caso, actuaciones, audiencias, onBack, onChanged, userId }: {
+  caso: Caso; actuaciones: Actuacion[]; audiencias: Audiencia[];
   onBack: () => void; onChanged: () => void; userId: string;
 }) => {
   const { toast } = useToast();
@@ -474,11 +441,6 @@ const CaseDetail = ({ caso, actuaciones, audiencias, documentos, onBack, onChang
     onChanged();
   };
 
-  const descargarDoc = async (d: DocRow) => {
-    const { data, error } = await supabase.storage.from("case-documents").createSignedUrl(d.file_path, 60);
-    if (error || !data?.signedUrl) { toast({ title: "Error", description: error?.message ?? "No se pudo descargar", variant: "destructive" }); return; }
-    window.open(data.signedUrl, "_blank");
-  };
 
   return (
     <>
@@ -681,206 +643,289 @@ const CaseDetail = ({ caso, actuaciones, audiencias, documentos, onBack, onChang
           </Button>
         </div>
       </div>
-
-      {/* Documentos del caso */}
-      <div className="bg-card rounded-xl border border-border p-5 mt-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="font-display text-lg font-semibold text-foreground">Documentos del caso</h2>
-          <span className="text-xs text-muted-foreground">{documentos.length} archivo(s)</span>
-        </div>
-        {documentos.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Sin documentos vinculados a este caso. Súbelos desde "Gestión Documental".</p>
-        ) : (
-          <ul className="grid gap-2">
-            {documentos.map((d) => (
-              <li key={d.id} className="flex items-center gap-3 border border-border rounded-lg p-3">
-                <div className="w-9 h-9 rounded-lg bg-accent/10 flex items-center justify-center flex-shrink-0">
-                  <FileText className="w-4 h-4 text-accent" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-body text-sm font-medium text-foreground truncate">{d.file_name}</p>
-                  <p className="font-body text-[11px] text-muted-foreground">
-                    {formatBytes(d.file_size)} · {new Date(d.created_at).toLocaleString("es-CO")}
-                    {d.uploaded_by !== userId && " · Enviado por el jefe"}
-                  </p>
-                </div>
-                <Button size="sm" variant="outline" onClick={() => descargarDoc(d)} className="text-xs gap-1.5">
-                  <Download className="w-3.5 h-3.5" /> Descargar
-                </Button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
     </>
   );
 };
 
-/* ── Calendario ── */
-const SeccionCalendario = ({ casos, audiencias, onOpenCase, onChanged }: { casos: Caso[]; audiencias: Audiencia[]; onOpenCase: (id: string) => void; onChanged: () => void }) => {
+/* ── Calendario visual mensual ── */
+const SeccionCalendario = ({ casos, audiencias, actuaciones, onOpenCase, onChanged }: { casos: Caso[]; audiencias: Audiencia[]; actuaciones: Actuacion[]; onOpenCase: (id: string) => void; onChanged: () => void }) => {
   const { toast } = useToast();
-  const casoMap = useMemo(() => Object.fromEntries(casos.map(c => [c.id, c.radicado])), [casos]);
-  const futuras = audiencias.filter(a => new Date(a.fecha_inicio) >= new Date()).slice(0, 50);
+  const [mesActual, setMesActual] = useState(() => {
+    const now = new Date();
+    return { year: now.getFullYear(), month: now.getMonth() };
+  });
+  const [diaSeleccionado, setDiaSeleccionado] = useState<string | null>(null);
+  const [filtro, setFiltro] = useState<string>("todos");
 
-  const eliminar = async (e: React.MouseEvent, aud: Audiencia) => {
+  const casoMap = useMemo(() => Object.fromEntries(casos.map(c => [c.id, c])), [casos]);
+
+  // Armar eventos
+  const eventos = useMemo(() => {
+    const evs: any[] = [];
+
+    // Audiencias
+    audiencias.forEach((a) => {
+      const caso = casoMap[a.case_id];
+      if (!caso) return;
+      evs.push({
+        id: "aud-" + a.id,
+        audId: a.id,
+        case_id: a.case_id,
+        fecha: a.fecha_inicio.split("T")[0],
+        hora: new Date(a.fecha_inicio).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit", hour12: false }),
+        titulo: a.titulo,
+        tipo: "audiencia",
+        radicado: caso.radicado,
+        tipoCaso: caso.tipo,
+        cliente: caso.cliente_nombre,
+        modalidad: a.modalidad,
+        enlace: a.enlace_virtual,
+        ubicacion: a.ubicacion,
+      });
+    });
+
+    // Actuaciones con vencimiento no cumplidas (documentos por entregar)
+    actuaciones.forEach((a) => {
+      if (!a.vence_at || a.cumplida) return;
+      const caso = casoMap[a.case_id];
+      if (!caso) return;
+      evs.push({
+        id: "act-" + a.id,
+        case_id: a.case_id,
+        fecha: a.vence_at,
+        hora: "23:59",
+        titulo: a.tipo,
+        subtitulo: a.descripcion,
+        tipo: "documento",
+        radicado: caso.radicado,
+        tipoCaso: caso.tipo,
+        cliente: caso.cliente_nombre,
+      });
+    });
+
+    // Casos en etapa Revisión con fecha_vencimiento
+    casos.forEach((c) => {
+      if (c.etapa !== "Revisión" || !c.fecha_vencimiento) return;
+      evs.push({
+        id: "rev-" + c.id,
+        case_id: c.id,
+        fecha: c.fecha_vencimiento,
+        hora: "23:59",
+        titulo: "Revisión del caso",
+        subtitulo: c.observaciones ?? undefined,
+        tipo: "revision",
+        radicado: c.radicado,
+        tipoCaso: c.tipo,
+        cliente: c.cliente_nombre,
+      });
+    });
+
+    evs.sort((a, b) => a.fecha.localeCompare(b.fecha) || a.hora.localeCompare(b.hora));
+    return evs;
+  }, [audiencias, actuaciones, casos, casoMap]);
+
+  const eliminarAudiencia = async (e: React.MouseEvent, audId: string, titulo: string) => {
     e.stopPropagation();
-    if (!confirm(`¿Eliminar audiencia "${aud.titulo}"?`)) return;
-    const { error } = await supabase.from("audiencias").delete().eq("id", aud.id);
+    if (!confirm(`¿Eliminar audiencia "${titulo}"?`)) return;
+    const { error } = await supabase.from("audiencias").delete().eq("id", audId);
     if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
     toast({ title: "Audiencia eliminada" });
     onChanged();
   };
 
-  return (
-    <>
-      <SectionHeader title="Calendario de Audiencias" description="Audiencias programadas en tus casos" />
-      {futuras.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No hay audiencias programadas.</p>
-      ) : (
-        <div className="grid gap-4">
-          {futuras.map((ev) => (
-            <button key={ev.id} onClick={() => onOpenCase(ev.case_id)} className="text-left bg-card rounded-xl border border-border p-5 flex items-center justify-between gap-4 hover:border-accent/30 hover:shadow-luxury transition-all">
-              <div className="flex items-center gap-4">
-                <div className="w-10 h-10 rounded-lg bg-accent/10 flex items-center justify-center"><CalendarDays className="w-4 h-4 text-accent" /></div>
-                <div>
-                  <p className="font-display text-base font-semibold text-foreground">{ev.titulo}</p>
-                  <p className="font-body text-xs text-muted-foreground">Caso {casoMap[ev.case_id] ?? "—"} · {ev.modalidad}</p>
-                </div>
+  const hoy = new Date().toISOString().split("T")[0];
+  const { year, month } = mesActual;
+  const primerDia = new Date(year, month, 1).getDay();
+  const diasEnMes = new Date(year, month + 1, 0).getDate();
+  const nombreMes = new Date(year, month, 1).toLocaleDateString("es-CO", { month: "long", year: "numeric" });
+
+  const eventosFiltrados = filtro === "todos" ? eventos : eventos.filter(e => e.tipo === filtro);
+  const eventosDelDia = (dia: number) => {
+    const f = `${year}-${String(month+1).padStart(2,"0")}-${String(dia).padStart(2,"0")}`;
+    return eventosFiltrados.filter(e => e.fecha === f);
+  };
+  const eventosDiaSel = diaSeleccionado ? eventosFiltrados.filter(e => e.fecha === diaSeleccionado) : [];
+  const proximosEventos = eventosFiltrados.filter(e => e.fecha >= hoy).slice(0, 8);
+  const conteo = (t: string) => eventos.filter(e => e.tipo === t && e.fecha >= hoy).length;
+
+  const TIPOS: Record<string, { dot: string; badge: string; card: string; icon: string; label: string }> = {
+    audiencia: { dot: "bg-blue-500",   badge: "bg-blue-100 text-blue-700",   card: "border-blue-200 bg-blue-50/60",   icon: "🏛", label: "Audiencia" },
+    documento: { dot: "bg-amber-500",  badge: "bg-amber-100 text-amber-700", card: "border-amber-200 bg-amber-50/60", icon: "📄", label: "Documento" },
+    revision:  { dot: "bg-violet-500", badge: "bg-violet-100 text-violet-700",card: "border-violet-200 bg-violet-50/60",icon: "⚖️", label: "Revisión" },
+  };
+
+  const EventoCard = ({ ev }: { ev: any }) => {
+    const t = TIPOS[ev.tipo] ?? TIPOS.audiencia;
+    return (
+      <button
+        type="button"
+        onClick={() => onOpenCase(ev.case_id)}
+        className={`w-full text-left rounded-xl border ${t.card} p-4 hover:shadow-luxury transition-all`}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-start gap-3 min-w-0 flex-1">
+            <span className="text-xl flex-shrink-0">{t.icon}</span>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap mb-1">
+                <span className={`font-body text-[10px] px-2 py-0.5 rounded-full font-medium ${t.badge}`}>{t.label}</span>
+                <span className="font-body text-xs font-semibold text-foreground">{ev.hora}</span>
               </div>
-              <div className="flex items-center gap-3">
-                <div className="text-right">
-                  <p className="font-body text-sm font-medium text-foreground">{new Date(ev.fecha_inicio).toLocaleString("es-CO", { dateStyle: "medium", timeStyle: "short" })}</p>
-                  {ev.enlace_virtual && <a onClick={(e) => e.stopPropagation()} href={ev.enlace_virtual} target="_blank" rel="noopener" className="font-body text-[10px] text-accent underline">Abrir videoconferencia</a>}
-                </div>
-                <button onClick={(e) => eliminar(e, ev)} className="p-1.5 rounded-md bg-muted text-muted-foreground hover:text-destructive" title="Eliminar">
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
+              <p className="font-display text-sm font-semibold text-foreground truncate">{ev.titulo}</p>
+              {ev.subtitulo && <p className="font-body text-xs text-muted-foreground mt-0.5 line-clamp-2">{ev.subtitulo}</p>}
+              <p className="font-body text-xs text-muted-foreground mt-1">
+                Caso #{ev.radicado} · {ev.cliente} · {ev.tipoCaso}
+              </p>
+              {ev.modalidad && (
+                <p className="font-body text-[10px] text-muted-foreground mt-0.5 flex items-center gap-1">
+                  {ev.modalidad === "virtual" ? <Video className="w-3 h-3" /> : <MapPin className="w-3 h-3" />}
+                  {ev.modalidad}{ev.ubicacion ? ` · ${ev.ubicacion}` : ""}
+                </p>
+              )}
+              {ev.enlace && (
+                <a onClick={(e) => e.stopPropagation()} href={ev.enlace} target="_blank" rel="noopener" className="inline-flex items-center gap-1 mt-2 font-body text-[10px] text-accent underline">
+                  <Video className="w-3 h-3" /> Abrir videoconferencia
+                </a>
+              )}
+            </div>
+          </div>
+          {ev.audId && (
+            <button onClick={(e) => eliminarAudiencia(e, ev.audId, ev.titulo)} className="p-1.5 rounded-md bg-white/60 text-muted-foreground hover:text-destructive flex-shrink-0" title="Eliminar audiencia">
+              <Trash2 className="w-3.5 h-3.5" />
             </button>
-          ))}
+          )}
         </div>
-      )}
-    </>
-  );
-};
+      </button>
+    );
+  };
 
-/* ── Términos ── */
-const SeccionTerminos = ({ casos, actuaciones, onOpenCase, onChanged }: { casos: Caso[]; actuaciones: Actuacion[]; onOpenCase: (id: string) => void; onChanged: () => void }) => {
-  const { toast } = useToast();
-  const casoMap = useMemo(() => Object.fromEntries(casos.map(c => [c.id, c])), [casos]);
-  const pendientes = actuaciones.filter(a => a.vence_at && !a.cumplida);
-  const today = new Date(); today.setHours(0,0,0,0);
-
-  const eliminar = async (e: React.MouseEvent, act: Actuacion) => {
-    e.stopPropagation();
-    if (!confirm(`¿Eliminar el término "${act.tipo}"?`)) return;
-    const { error } = await supabase.from("actuaciones").delete().eq("id", act.id);
-    if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
-    toast({ title: "Término eliminado" });
-    onChanged();
+  const mesAnterior = () => {
+    setDiaSeleccionado(null);
+    setMesActual(p => p.month === 0 ? { year: p.year - 1, month: 11 } : { year: p.year, month: p.month - 1 });
+  };
+  const mesSiguiente = () => {
+    setDiaSeleccionado(null);
+    setMesActual(p => p.month === 11 ? { year: p.year + 1, month: 0 } : { year: p.year, month: p.month + 1 });
+  };
+  const irHoy = () => {
+    const now = new Date();
+    setMesActual({ year: now.getFullYear(), month: now.getMonth() });
+    setDiaSeleccionado(hoy);
   };
 
   return (
     <>
-      <SectionHeader title="Control de Términos" description="Plazos procesales activos en tus casos. Haz clic para ir al caso." />
-      {pendientes.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No hay términos pendientes.</p>
-      ) : (
-        <div className="grid gap-4">
-          {pendientes.map((t) => {
-            const vence = new Date(t.vence_at!);
-            const diasRestantes = Math.ceil((vence.getTime() - today.getTime()) / 86400000);
-            const total = t.termino_dias ?? 15;
-            const transcurridos = total - diasRestantes;
-            const pct = Math.max(0, Math.min(100, (transcurridos / total) * 100));
-            const urgente = diasRestantes <= 2;
-            const vencido = diasRestantes < 0;
-            const caso = casoMap[t.case_id];
-            return (
-              <button key={t.id} onClick={() => onOpenCase(t.case_id)} className="text-left bg-card rounded-xl border border-border p-5 hover:border-accent/30 hover:shadow-luxury transition-all">
-                <div className="flex items-center justify-between mb-3 gap-3">
-                  <div className="flex items-center gap-3">
-                    {(urgente || vencido) && <AlertTriangle className="w-4 h-4 text-destructive" />}
-                    <div>
-                      <p className="font-display text-base font-semibold text-foreground">{t.tipo}</p>
-                      <p className="font-body text-xs text-muted-foreground">Caso {caso?.radicado ?? "—"} · {t.descripcion}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className={`font-body text-sm font-semibold ${urgente || vencido ? "text-destructive" : "text-foreground"}`}>
-                      {vencido ? `Vencido hace ${Math.abs(diasRestantes)} d` : `${diasRestantes} días restantes`}
-                    </span>
-                    <button onClick={(e) => eliminar(e, t)} className="p-1.5 rounded-md bg-muted text-muted-foreground hover:text-destructive" title="Eliminar">
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-                <div className="w-full h-2 rounded-full bg-muted">
-                  <div className={`h-2 rounded-full transition-all ${urgente || vencido ? "bg-destructive" : "bg-accent"}`} style={{ width: `${pct}%` }} />
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      )}
-    </>
-  );
-};
+      <SectionHeader title="Calendario" description="Audiencias, entregas de documentos y revisiones de tus casos" />
 
-/* ── Analítica ── */
-const SeccionAnalitica = ({ casos, actuaciones, audiencias }: { casos: Caso[]; actuaciones: Actuacion[]; audiencias: Audiencia[] }) => {
-  const activos = casos.filter(c => c.etapa !== "Cerrado").length;
-  const cerrados = casos.filter(c => c.etapa === "Cerrado").length;
-  const today = new Date(); today.setHours(0,0,0,0);
-  const proximasAudiencias = audiencias.filter(a => new Date(a.fecha_inicio) >= today).length;
-  const terminosPendientes = actuaciones.filter(a => a.vence_at && !a.cumplida).length;
-  const cumplidas = actuaciones.filter(a => a.cumplida).length;
-
-  const porEtapa = Object.entries(casos.reduce<Record<string, number>>((acc, c) => { acc[c.etapa] = (acc[c.etapa] ?? 0) + 1; return acc; }, {})).map(([name, value]) => ({ name, value }));
-  const porTipo = Object.entries(casos.reduce<Record<string, number>>((acc, c) => { acc[c.tipo || "—"] = (acc[c.tipo || "—"] ?? 0) + 1; return acc; }, {})).map(([name, value]) => ({ name, value }));
-  const actuacionesData = [
-    { name: "Cumplidas", value: cumplidas },
-    { name: "Pendientes", value: terminosPendientes },
-  ].filter(d => d.value > 0);
-
-  const kpis = [
-    { label: "Casos Activos", value: activos, color: "from-indigo-500 to-violet-500", icon: Briefcase },
-    { label: "Casos Cerrados", value: cerrados, color: "from-emerald-500 to-teal-500", icon: TrendingUp },
-    { label: "Audiencias Próximas", value: proximasAudiencias, color: "from-sky-500 to-cyan-500", icon: CalendarDays },
-    { label: "Términos Pendientes", value: terminosPendientes, color: "from-rose-500 to-orange-500", icon: AlertTriangle },
-  ];
-
-  return (
-    <>
-      <SectionHeader title="Analítica y KPIs" description="Indicadores en tiempo real de tu carga laboral" />
-      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        {kpis.map((k) => (
-          <div key={k.label} className={`rounded-xl p-5 text-white shadow-luxury bg-gradient-to-br ${k.color}`}>
-            <div className="flex items-center justify-between">
-              <p className="font-body text-xs uppercase tracking-wider opacity-80">{k.label}</p>
-              <k.icon className="w-4 h-4 opacity-80" />
-            </div>
-            <p className="font-display text-3xl font-bold mt-2">{k.value}</p>
-          </div>
+      {/* Filtros */}
+      <div className="flex flex-wrap gap-2 mb-4">
+        <button type="button" onClick={() => setFiltro("todos")}
+          className={`font-body text-xs px-3 py-1.5 rounded-full border transition-colors ${filtro === "todos" ? "border-accent bg-accent/10 text-foreground" : "border-border text-muted-foreground hover:border-accent/40"}`}>
+          Todos ({eventos.filter(e => e.fecha >= hoy).length})
+        </button>
+        {Object.entries(TIPOS).map(([k, t]) => (
+          <button key={k} type="button" onClick={() => setFiltro(k)}
+            className={`font-body text-xs px-3 py-1.5 rounded-full border transition-colors flex items-center gap-1.5 ${filtro === k ? "border-accent bg-accent/10 text-foreground" : "border-border text-muted-foreground hover:border-accent/40"}`}>
+            <span>{t.icon}</span> {t.label} ({conteo(k)})
+          </button>
         ))}
       </div>
-      <div className="grid lg:grid-cols-3 gap-4">
+
+      <div className="grid lg:grid-cols-[1fr_360px] gap-6">
+        {/* Calendario mensual */}
         <div className="bg-card rounded-xl border border-border p-5">
-          <p className="font-display text-base font-semibold text-foreground mb-4">Casos por Etapa</p>
-          <div className="h-64"><RPieChart data={porEtapa} /></div>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-display text-base font-semibold text-foreground capitalize">{nombreMes}</h3>
+            <div className="flex items-center gap-1">
+              <button type="button" onClick={mesAnterior} className="p-1.5 rounded-md hover:bg-muted text-muted-foreground" title="Mes anterior">
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <button type="button" onClick={irHoy} className="font-body text-xs px-3 py-1.5 rounded-md hover:bg-muted text-muted-foreground">
+                Hoy
+              </button>
+              <button type="button" onClick={mesSiguiente} className="p-1.5 rounded-md hover:bg-muted text-muted-foreground" title="Mes siguiente">
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-7 gap-1 mb-1">
+            {["Dom","Lun","Mar","Mié","Jue","Vie","Sáb"].map(d => (
+              <div key={d} className="font-body text-[10px] text-muted-foreground uppercase tracking-wider text-center py-1">{d}</div>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-7 gap-1">
+            {Array.from({ length: primerDia }).map((_,i) => <div key={"ep"+i} />)}
+            {Array.from({ length: diasEnMes }).map((_, i) => {
+              const dia = i + 1;
+              const fecha = `${year}-${String(month+1).padStart(2,"0")}-${String(dia).padStart(2,"0")}`;
+              const evs = eventosDelDia(dia);
+              const esHoy = fecha === hoy;
+              const esSel = fecha === diaSeleccionado;
+              return (
+                <button
+                  type="button"
+                  key={dia}
+                  onClick={() => setDiaSeleccionado(esSel ? null : fecha)}
+                  className={`min-h-[64px] rounded-lg border p-1.5 text-left transition-colors ${
+                    esSel ? "border-accent bg-accent/10" :
+                    esHoy ? "border-accent/50 bg-accent/5" :
+                    evs.length > 0 ? "border-border hover:border-accent/30 hover:bg-muted/40" :
+                    "border-border/40 hover:bg-muted/30"
+                  }`}
+                >
+                  <div className={`font-display text-xs font-semibold mb-1 ${esHoy ? "text-accent" : "text-foreground"}`}>
+                    {dia}
+                  </div>
+                  <div className="flex flex-wrap gap-0.5">
+                    {evs.slice(0, 3).map(ev => (
+                      <span key={ev.id} className={`w-1.5 h-1.5 rounded-full ${TIPOS[ev.tipo]?.dot ?? "bg-muted-foreground"}`} />
+                    ))}
+                    {evs.length > 3 && <span className="font-body text-[9px] text-muted-foreground">+{evs.length - 3}</span>}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Detalle del día seleccionado */}
+          {diaSeleccionado && (
+            <div className="mt-5 pt-5 border-t border-border">
+              <div className="flex items-center justify-between mb-3">
+                <p className="font-display text-sm font-semibold text-foreground capitalize">
+                  {new Date(diaSeleccionado + "T12:00:00").toLocaleDateString("es-CO", { weekday: "long", day: "numeric", month: "long" })}
+                </p>
+                <button type="button" onClick={() => setDiaSeleccionado(null)} className="p-1 rounded-md hover:bg-muted text-muted-foreground" title="Cerrar">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              {eventosDiaSel.length === 0 ? (
+                <p className="font-body text-xs text-muted-foreground">No hay eventos este día.</p>
+              ) : (
+                <div className="grid gap-2">
+                  {eventosDiaSel.map(ev => <EventoCard key={ev.id} ev={ev} />)}
+                </div>
+              )}
+            </div>
+          )}
         </div>
+
+        {/* Columna lateral: próximos eventos */}
         <div className="bg-card rounded-xl border border-border p-5">
-          <p className="font-display text-base font-semibold text-foreground mb-4">Casos por Tipo</p>
-          <div className="h-64"><RBarChart data={porTipo} /></div>
-        </div>
-        <div className="bg-card rounded-xl border border-border p-5">
-          <p className="font-display text-base font-semibold text-foreground mb-4">Actuaciones</p>
-          <div className="h-64"><RPieChart data={actuacionesData} /></div>
+          <h3 className="font-display text-base font-semibold text-foreground mb-4">Próximos eventos</h3>
+          {proximosEventos.length === 0 ? (
+            <p className="font-body text-xs text-muted-foreground">No hay eventos próximos.</p>
+          ) : (
+            <div className="grid gap-2">
+              {proximosEventos.map(ev => <EventoCard key={ev.id} ev={ev} />)}
+            </div>
+          )}
         </div>
       </div>
     </>
   );
 };
+
 
 /* ── Notificaciones (REALES desde tabla notificaciones) ── */
 const SeccionNotificaciones = ({ notificaciones, casos, onOpenCase, onChanged }: { notificaciones: Notificacion[]; casos: Caso[]; onOpenCase: (id: string) => void; onChanged: () => void }) => {
