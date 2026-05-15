@@ -6,7 +6,7 @@ const team = [
   },
   {
     name: "Rusbel Perdomo",
-    role: "Abogado, Oficial Retirado del Ejército",
+    role: "Abogado Especialista en derecho militar y predial",
     image: "https://jurovalegal.com/wp-content/uploads/2025/10/perfil-2-1.jpg",
   },
   {

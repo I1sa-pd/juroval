@@ -3,6 +3,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { useNavigate } from "react-router-dom";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import {
   Scale,
   Shield,
@@ -16,6 +17,7 @@ import {
   Menu,
   X,
   ChevronRight,
+  ChevronDown,
   Check,
   XCircle,
   MessageSquare,
@@ -30,6 +32,7 @@ import {
   Phone,
   Mail,
   CheckSquare,
+  KeyRound,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -43,7 +46,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { GestionDocumentos } from "@/components/GestionDocumentos";
-import { RPieChart, RBarChart, RLineChart } from "@/components/AnalyticsCharts";
+import { RPieChart, RBarChart, RLineChart, RMultiLineChart } from "@/components/AnalyticsCharts";
 import { Upload } from "lucide-react";
 
 const menuItems = [
@@ -58,7 +61,6 @@ const menuItems = [
   { id: "analitica", icon: BarChart3, label: "Analítica y KPIs" },
   { id: "notificaciones", icon: Bell, label: "Notificaciones" },
   { id: "solicitudes", icon: Phone, label: "Solicitudes de Contacto" },
-  { id: "configuracion", icon: Settings, label: "Configuración" },
 ];
 
 const DashboardJefe = () => {
@@ -106,7 +108,11 @@ const DashboardJefe = () => {
             </button>
           ))}
         </nav>
-        <div className="p-3 border-t border-accent/10">
+        <div className="p-3 border-t border-accent/10 space-y-1">
+          <button onClick={() => navigate("/cambiar-password")} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-body text-sm text-primary-foreground/60 hover:text-primary-foreground hover:bg-accent/5 transition-colors">
+            <KeyRound className="w-4 h-4" />
+            Cambiar contraseña
+          </button>
           <button onClick={handleLogout} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-body text-sm text-primary-foreground/40 hover:text-primary-foreground hover:bg-accent/5 transition-colors">
             <LogOut className="w-4 h-4" />
             Cerrar Sesión
@@ -146,7 +152,11 @@ const DashboardJefe = () => {
                 </button>
               ))}
             </nav>
-            <div className="p-3 border-t border-accent/10">
+            <div className="p-3 border-t border-accent/10 space-y-1">
+              <button onClick={() => { navigate("/cambiar-password"); setSidebarOpen(false); }} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-body text-sm text-primary-foreground/60 hover:text-primary-foreground hover:bg-accent/5 transition-colors">
+                <KeyRound className="w-4 h-4" />
+                Cambiar contraseña
+              </button>
               <button onClick={handleLogout} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-body text-sm text-primary-foreground/40 hover:text-primary-foreground hover:bg-accent/5 transition-colors">
                 <LogOut className="w-4 h-4" />
                 Cerrar Sesión
@@ -170,7 +180,6 @@ const DashboardJefe = () => {
           {activeSection === "analitica" && <SeccionAnaliticaJefe />}
           {activeSection === "notificaciones" && <SeccionNotificacionesJefe setActiveSection={handleSetSection} />}
           {activeSection === "solicitudes" && <SeccionSolicitudes />}
-          {activeSection === "configuracion" && <SeccionConfiguracion />}
         </div>
       </main>
     </div>
@@ -198,6 +207,7 @@ type RevAud = { id: string; case_id: string; titulo: string; fecha_inicio: strin
 type RevDoc = { id: string; case_id: string | null; file_name: string; file_path: string; created_at: string; uploaded_by: string };
 
 const SeccionRevision = () => {
+  const { user } = useAuth();
   const { toast } = useToast();
   const [casos, setCasos] = useState<RevCaso[]>([]);
   const [acts, setActs] = useState<RevAct[]>([]);
@@ -256,11 +266,20 @@ const SeccionRevision = () => {
 
   useEffect(() => { load(); }, []);
 
-  const aprobar = async (caso: RevCaso) => {
+ const aprobar = async (caso: RevCaso) => {
     const idx = etapas.indexOf(caso.etapa);
     const next = etapas[Math.min(idx + 1, etapas.length - 1)];
-    const { error } = await supabase.from("cases").update({ etapa: next as any }).eq("id", caso.id);
+    const { error } = await supabase.from("cases").update({ etapa: next as any, revision_rechazada: false } as any).eq("id", caso.id);
     if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
+    if (caso.abogado_id) {
+      await supabase.from("notificaciones").insert({
+        user_id: caso.abogado_id,
+        case_id: caso.id,
+        tipo: "caso_aprobado",
+        titulo: "Caso aprobado por el director",
+        mensaje: `El director aprobó el caso #${caso.radicado} (${caso.cliente_nombre}). Avanzó a la etapa: ${next}.`,
+      });
+    }
     toast({ title: "Caso aprobado", description: `Avanzó a ${next}` });
     setExpandedCase(null);
     load();
@@ -273,6 +292,24 @@ const SeccionRevision = () => {
 ${caso.observaciones ?? ""}`.trim();
     const { error } = await supabase.from("cases").update({ etapa: "Proyección" as any, observaciones: obs }).eq("id", caso.id);
     if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
+    if (caso.abogado_id) {
+      await supabase.from("notificaciones").insert({
+        user_id: caso.abogado_id,
+        case_id: caso.id,
+        tipo: "caso_devuelto",
+        titulo: "Caso devuelto para corrección",
+        mensaje: `El director devolvió el caso #${caso.radicado} (${caso.cliente_nombre}) a Proyección. Observación: ${observacion.trim().slice(0, 120)}`,
+      });
+    }
+    if (user) {
+      await supabase.from("notificaciones").insert({
+        user_id: user.id,
+        case_id: caso.id,
+        tipo: "caso_devuelto_log",
+        titulo: `Caso #${caso.radicado} devuelto a Proyección`,
+        mensaje: `Devolviste el caso de ${caso.cliente_nombre}. Observación: "${observacion.trim().slice(0, 100)}"`,
+      });
+    }
     toast({ title: "Caso devuelto", description: "El abogado verá las correcciones." });
     setObservacion(""); setExpandedCase(null);
     load();
@@ -580,6 +617,9 @@ const SeccionAsignacion = () => {
   // Datos de selects
   const [abogados, setAbogados] = useState<{ id: string; full_name: string; area_id: string | null }[]>([]);
   const [clientes, setClientes] = useState<{ id: string; full_name: string; email: string; cedula: string | null }[]>([]);
+  const [solicitudes, setSolicitudes] = useState<{ id: string; nombre: string; email: string; telefono: string; cedula: string | null; direccion: string | null; motivo: string; created_at: string }[]>([]);
+  const [generatedPassword, setGeneratedPassword] = useState<string>("");
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [areas, setAreas] = useState<{ id: string; nombre: string }[]>([]);
   const [tiposProceso, setTiposProceso] = useState<{ id: string; nombre: string; area_id: string | null }[]>([]);
   const [juzgados, setJuzgados] = useState<{ id: string; nombre: string; ciudad: string | null }[]>([]);
@@ -606,10 +646,12 @@ const SeccionAsignacion = () => {
     });
   };
 
-  // Form nuevo caso — persiste en sessionStorage
-  const defaultForm = {
+ const defaultForm = {
     radicado: "", tipo: "", area_nombre: "", tipo_proceso_nombre: "",
     cliente_id: "", cliente_nombre: "", cliente_externo: false,
+    cliente_email: "", cliente_cedula: "", cliente_telefono: "", cliente_direccion: "",
+    cliente_origen: "" as "" | "registrado" | "solicitud" | "externo",
+    solicitud_id: "",
     juzgado: "", abogado_id: "", observaciones: "", fecha_vencimiento: "", urgente: false,
   };
   const [form, setFormRaw] = useState<typeof defaultForm>(() => {
@@ -626,10 +668,11 @@ const SeccionAsignacion = () => {
     });
   };
 
-  const load = async () => {
+ const load = async () => {
     const [
       { data: roleAbogado }, { data: roleCliente },
-      { data: aData }, { data: tData }, { data: jData }, { data: casData }
+      { data: aData }, { data: tData }, { data: jData }, { data: casData },
+      { data: solData },
     ] = await Promise.all([
       supabase.from("user_roles").select("user_id").eq("role", "abogado"),
       supabase.from("user_roles").select("user_id").eq("role", "cliente"),
@@ -637,6 +680,7 @@ const SeccionAsignacion = () => {
       supabase.from("tipos_proceso").select("id, nombre, area_id").order("nombre"),
       supabase.from("juzgados").select("id, nombre, ciudad").order("nombre"),
       supabase.from("cases").select("id, radicado, cliente_nombre, cliente_id, tipo, etapa, abogado_id, urgente, fecha_vencimiento, observaciones, created_at").neq("etapa", "Cerrado").order("created_at", { ascending: false }),
+      supabase.from("contact_requests").select("id, nombre, email, telefono, cedula, direccion, motivo, created_at").order("created_at", { ascending: false }),
     ]);
 
     const abIds = (roleAbogado ?? []).map(r => r.user_id);
@@ -653,6 +697,7 @@ const SeccionAsignacion = () => {
     setTiposProceso(tData ?? []);
     setJuzgados(jData ?? []);
     setCasosExistentes(casData ?? []);
+    setSolicitudes((solData ?? []) as any);
   };
 
   useEffect(() => { load(); }, []);
@@ -690,7 +735,7 @@ const SeccionAsignacion = () => {
     { label: "Confirmar" },
   ];
 
-  const handleSubmit = async () => {
+    const handleSubmit = async () => {
     if (!user) return;
     if (!form.radicado.trim() || !form.tipo.trim() || !form.cliente_nombre.trim()) {
       toast({ title: "Faltan datos", description: "Radicado, tipo y cliente son obligatorios", variant: "destructive" });
@@ -700,9 +745,49 @@ const SeccionAsignacion = () => {
       toast({ title: "Radicado duplicado", description: "Ya existe un caso con ese número", variant: "destructive" });
       setPaso(0); return;
     }
+    // Si es externo o solicitud, exigir email para crear la cuenta
+    const necesitaCrearCuenta = (form.cliente_origen === "externo" || form.cliente_origen === "solicitud") && !form.cliente_id;
+    if (necesitaCrearCuenta) {
+      if (!form.cliente_email.trim()) {
+        toast({ title: "Falta email", description: "El email es obligatorio para crear la cuenta del cliente", variant: "destructive" });
+        setPaso(0); return;
+      }
+    }
     if (!form.abogado_id) {
       toast({ title: "Sin abogado asignado", description: "¿Seguro? El caso quedará sin responsable hasta que lo asignes.", variant: "default" });
     }
+
+    setSubmitting(true);
+
+    // Crear cuenta de cliente si es externo o solicitud
+    let clienteIdFinal = form.cliente_id;
+    let passwordGenerada = "";
+    if (necesitaCrearCuenta) {
+      passwordGenerada = `Jrv-${Math.random().toString(36).slice(2, 8)}-${Math.floor(Math.random() * 9000) + 1000}`;
+      const { data: createData, error: createErr } = await supabase.functions.invoke("create-abogado", {
+        body: {
+          full_name: form.cliente_nombre.trim(),
+          email: form.cliente_email.trim(),
+          password: passwordGenerada,
+          phone: form.cliente_telefono.trim() || null,
+          cedula: form.cliente_cedula.trim() || null,
+          direccion: form.cliente_direccion.trim() || null,
+          role: "cliente",
+        },
+      });
+      if (createErr || (createData as any)?.error) {
+        setSubmitting(false);
+        toast({ title: "No se pudo crear el cliente", description: (createData as any)?.error ?? createErr?.message ?? "Error desconocido", variant: "destructive" });
+        return;
+      }
+      clienteIdFinal = (createData as any).user_id;
+
+      // Si vino de una solicitud, marcarla como atendida
+      if (form.cliente_origen === "solicitud" && form.solicitud_id) {
+        await supabase.from("contact_requests").update({ atendido: true, abogado_asignado_id: form.abogado_id || null }).eq("id", form.solicitud_id);
+      }
+    }
+
     // Armar observaciones con los términos si se llenaron
     const terminosTexto = etapas
       .filter(et => terminos[et])
@@ -713,12 +798,11 @@ const SeccionAsignacion = () => {
       form.observaciones.trim(),
     ].filter(Boolean).join("\n\n");
 
-    setSubmitting(true);
     const { error } = await supabase.from("cases").insert({
       radicado: form.radicado.trim(),
       tipo: form.tipo.trim(),
       cliente_nombre: form.cliente_nombre.trim(),
-      cliente_id: form.cliente_id || null,
+      cliente_id: clienteIdFinal || null,
       juzgado: form.juzgado || null,
       abogado_id: form.abogado_id || null,
       observaciones: obsCompleta || null,
@@ -731,6 +815,13 @@ const SeccionAsignacion = () => {
       toast({ title: "Error al crear el caso", description: error.message, variant: "destructive" });
       return;
     }
+
+    // Mostrar password generada al director
+    if (passwordGenerada) {
+      setGeneratedPassword(passwordGenerada);
+      setShowPasswordModal(true);
+    }
+
     toast({ title: "✓ Caso asignado", description: `Radicado ${form.radicado} creado correctamente.` });
     sessionStorage.removeItem("asig_form");
     sessionStorage.removeItem("asig_terminos");
@@ -873,54 +964,161 @@ const SeccionAsignacion = () => {
                 <h3 className="font-display text-lg font-semibold">Vincular Cliente</h3>
                 <div className="flex gap-3 mb-4">
                   <button type="button"
-                    onClick={() => setForm({ ...form, cliente_externo: false, cliente_id: "", cliente_nombre: "" })}
+                    onClick={() => setForm({ ...form, cliente_externo: false, cliente_id: "", cliente_nombre: "", cliente_email: "", cliente_cedula: "", cliente_telefono: "", cliente_direccion: "", cliente_origen: "", solicitud_id: "" })}
                     className={`flex-1 p-3 rounded-xl border text-sm font-body transition-colors ${!form.cliente_externo ? "border-accent bg-accent/5 text-foreground" : "border-border text-muted-foreground hover:border-accent/30"}`}
                   >
                     Cliente registrado en el sistema
                   </button>
                   <button type="button"
-                    onClick={() => setForm({ ...form, cliente_externo: true, cliente_id: "", cliente_nombre: "" })}
+                    onClick={() => setForm({ ...form, cliente_externo: true, cliente_id: "", cliente_nombre: "", cliente_email: "", cliente_cedula: "", cliente_telefono: "", cliente_direccion: "", cliente_origen: "externo", solicitud_id: "" })}
                     className={`flex-1 p-3 rounded-xl border text-sm font-body transition-colors ${form.cliente_externo ? "border-accent bg-accent/5 text-foreground" : "border-border text-muted-foreground hover:border-accent/30"}`}
                   >
-                    Cliente externo (sin cuenta)
+                    Cliente nuevo (sin registrar)
                   </button>
                 </div>
 
                 {!form.cliente_externo ? (
-                  clientes.length === 0 ? (
-                    <div className="bg-muted/40 rounded-lg p-4 text-center">
-                      <p className="font-body text-sm text-muted-foreground">No hay clientes registrados aún.</p>
-                      <p className="font-body text-xs text-muted-foreground mt-1">Crea uno desde "Gestión de Usuarios" para que pueda ver su caso.</p>
+                  <div className="space-y-6">
+                    {/* Sección 1: Clientes con cuenta */}
+                    <div>
+                      <h4 className="font-display text-sm font-semibold text-foreground mb-2 flex items-center gap-2">
+                        <Users className="w-4 h-4 text-accent" />
+                        Clientes con cuenta ({clientes.length})
+                      </h4>
+                      {clientes.length === 0 ? (
+                        <div className="bg-muted/40 rounded-lg p-4 text-center">
+                          <p className="font-body text-sm text-muted-foreground">No hay clientes registrados aún.</p>
+                        </div>
+                      ) : (
+                        <div className="grid gap-2 max-h-56 overflow-auto">
+                          {clientes.map(cl => (
+                            <button type="button"
+                              key={cl.id}
+                              onClick={() => setForm({ ...form, cliente_id: cl.id, cliente_nombre: cl.full_name, cliente_origen: "registrado", solicitud_id: "" })}
+                              className={`w-full text-left p-3 rounded-xl border transition-colors flex items-center gap-3 ${form.cliente_id === cl.id ? "border-accent bg-accent/5" : "border-border hover:border-accent/30"}`}
+                            >
+                              <div className="w-9 h-9 rounded-full bg-accent/10 flex items-center justify-center flex-shrink-0">
+                                <Users className="w-4 h-4 text-accent" />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="font-body text-sm font-medium text-foreground truncate">{cl.full_name}</p>
+                                <p className="font-body text-xs text-muted-foreground truncate">{cl.email}{cl.cedula ? ` · CC ${cl.cedula}` : ""}</p>
+                              </div>
+                              {form.cliente_id === cl.id && <Check className="w-4 h-4 text-accent ml-auto flex-shrink-0" />}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                  ) : (
-                    <div className="grid gap-2 max-h-72 overflow-auto">
-                      {clientes.map(cl => (
-                        <button type="button"
-                          key={cl.id}
-                          onClick={() => setForm({ ...form, cliente_id: cl.id, cliente_nombre: cl.full_name })}
-                          className={`w-full text-left p-3 rounded-xl border transition-colors flex items-center gap-3 ${form.cliente_id === cl.id ? "border-accent bg-accent/5" : "border-border hover:border-accent/30"}`}
-                        >
-                          <div className="w-9 h-9 rounded-full bg-accent/10 flex items-center justify-center flex-shrink-0">
-                            <Users className="w-4 h-4 text-accent" />
-                          </div>
-                          <div className="min-w-0">
-                            <p className="font-body text-sm font-medium text-foreground truncate">{cl.full_name}</p>
-                            <p className="font-body text-xs text-muted-foreground truncate">{cl.email}{cl.cedula ? ` · CC ${cl.cedula}` : ""}</p>
-                          </div>
-                          {form.cliente_id === cl.id && <Check className="w-4 h-4 text-accent ml-auto flex-shrink-0" />}
-                        </button>
-                      ))}
+
+                    {/* Sección 2: Solicitudes de contacto */}
+                    <div>
+                      <h4 className="font-display text-sm font-semibold text-foreground mb-2 flex items-center gap-2">
+                        <Phone className="w-4 h-4 text-accent" />
+                        Solicitudes de contacto ({solicitudes.length})
+                      </h4>
+                      {solicitudes.length === 0 ? (
+                        <div className="bg-muted/40 rounded-lg p-4 text-center">
+                          <p className="font-body text-sm text-muted-foreground">No hay solicitudes de contacto.</p>
+                        </div>
+                      ) : (
+                        <div className="grid gap-2 max-h-56 overflow-auto">
+                          {solicitudes.map(s => (
+                            <button type="button"
+                              key={s.id}
+                              onClick={() => setForm({
+                                ...form,
+                                cliente_id: "",
+                                cliente_nombre: s.nombre,
+                                cliente_email: s.email,
+                                cliente_cedula: s.cedula ?? "",
+                                cliente_telefono: s.telefono,
+                                cliente_direccion: s.direccion ?? "",
+                                cliente_origen: "solicitud",
+                                solicitud_id: s.id,
+                              })}
+                              className={`w-full text-left p-3 rounded-xl border transition-colors flex items-center gap-3 ${form.solicitud_id === s.id ? "border-accent bg-accent/5" : "border-border hover:border-accent/30"}`}
+                            >
+                              <div className="w-9 h-9 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
+                                <Phone className="w-4 h-4 text-blue-600" />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="font-body text-sm font-medium text-foreground truncate">{s.nombre}</p>
+                                <p className="font-body text-xs text-muted-foreground truncate">{s.email} · {s.telefono}</p>
+                                <p className="font-body text-[10px] text-muted-foreground/70">
+                                  Motivo: {s.motivo} · {new Date(s.created_at).toLocaleDateString("es-CO", { day: "2-digit", month: "short", year: "numeric" })}
+                                </p>
+                              </div>
+                              {form.solicitud_id === s.id && <Check className="w-4 h-4 text-accent ml-auto flex-shrink-0" />}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                  )
+
+                    {/* Si seleccionó una solicitud, mostrar campos editables (puede completar datos) */}
+                    {form.cliente_origen === "solicitud" && (
+                      <div className="bg-blue-50 rounded-xl border border-blue-200 p-4 space-y-3">
+                        <p className="font-body text-xs font-semibold text-blue-900">
+                          📝 Se creará una cuenta nueva para este cliente. Completa los datos si falta algo:
+                        </p>
+                        <div className="grid sm:grid-cols-2 gap-3">
+                          <div>
+                            <Label className="font-body text-xs">Nombre completo *</Label>
+                            <Input value={form.cliente_nombre} onChange={e => setForm({ ...form, cliente_nombre: e.target.value })} />
+                          </div>
+                          <div>
+                            <Label className="font-body text-xs">Email *</Label>
+                            <Input type="email" value={form.cliente_email} onChange={e => setForm({ ...form, cliente_email: e.target.value })} />
+                          </div>
+                          <div>
+                            <Label className="font-body text-xs">Cédula</Label>
+                            <Input value={form.cliente_cedula} onChange={e => setForm({ ...form, cliente_cedula: e.target.value })} />
+                          </div>
+                          <div>
+                            <Label className="font-body text-xs">Celular</Label>
+                            <Input value={form.cliente_telefono} onChange={e => setForm({ ...form, cliente_telefono: e.target.value })} />
+                          </div>
+                          <div className="sm:col-span-2">
+                            <Label className="font-body text-xs">Dirección física</Label>
+                            <Input value={form.cliente_direccion} onChange={e => setForm({ ...form, cliente_direccion: e.target.value })} />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 ) : (
-                  <div className="space-y-2">
-                    <Label className="font-body text-sm">Nombre del cliente *</Label>
-                    <Input value={form.cliente_nombre} onChange={e => setForm({ ...form, cliente_nombre: e.target.value })} placeholder="Nombre completo del cliente" />
-                    <p className="font-body text-xs text-muted-foreground">Este cliente no podrá ver su caso en el portal digital.</p>
+                  <div className="bg-muted/30 rounded-xl border border-border p-4 space-y-3">
+                    <p className="font-body text-xs font-semibold text-foreground">
+                      📝 Se creará una cuenta nueva para este cliente. Te mostraremos la contraseña inicial al finalizar.
+                    </p>
+                    <div className="grid sm:grid-cols-2 gap-3">
+                      <div>
+                        <Label className="font-body text-xs">Nombre completo *</Label>
+                        <Input value={form.cliente_nombre} onChange={e => setForm({ ...form, cliente_nombre: e.target.value })} placeholder="Nombre completo del cliente" />
+                      </div>
+                      <div>
+                        <Label className="font-body text-xs">Email *</Label>
+                        <Input type="email" value={form.cliente_email} onChange={e => setForm({ ...form, cliente_email: e.target.value })} placeholder="cliente@ejemplo.com" />
+                      </div>
+                      <div>
+                        <Label className="font-body text-xs">Cédula</Label>
+                        <Input value={form.cliente_cedula} onChange={e => setForm({ ...form, cliente_cedula: e.target.value })} />
+                      </div>
+                      <div>
+                        <Label className="font-body text-xs">Celular</Label>
+                        <Input value={form.cliente_telefono} onChange={e => setForm({ ...form, cliente_telefono: e.target.value })} />
+                      </div>
+                      <div className="sm:col-span-2">
+                        <Label className="font-body text-xs">Dirección física</Label>
+                        <Input value={form.cliente_direccion} onChange={e => setForm({ ...form, cliente_direccion: e.target.value })} placeholder="Ciudad, barrio, calle" />
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
             )}
+         
 
             {/* Paso 2: Abogado */}
             {paso === 2 && (
@@ -1143,6 +1341,37 @@ const SeccionAsignacion = () => {
           })}
         </div>
       )}
+      
+
+      {/* Modal de contraseña generada para cliente nuevo */}
+      <Dialog open={showPasswordModal} onOpenChange={setShowPasswordModal}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>✓ Caso creado y cuenta de cliente generada</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="font-body text-sm text-muted-foreground">
+              Entrega estos datos al cliente para que pueda ingresar al portal:
+            </p>
+            <div className="bg-muted/40 rounded-lg p-4 space-y-2">
+              <div>
+                <p className="font-body text-[10px] text-muted-foreground uppercase tracking-wider">Email</p>
+                <p className="font-body text-sm font-mono text-foreground break-all">{form.cliente_email}</p>
+              </div>
+              <div>
+                <p className="font-body text-[10px] text-muted-foreground uppercase tracking-wider">Contraseña inicial</p>
+                <p className="font-body text-sm font-mono text-foreground">{generatedPassword}</p>
+              </div>
+            </div>
+            <p className="font-body text-xs text-muted-foreground">
+              ℹ️ El cliente podrá cambiar la contraseña desde su panel después de iniciar sesión.
+            </p>
+            <Button onClick={() => { setShowPasswordModal(false); setGeneratedPassword(""); }} className="w-full gradient-gold text-primary border-0">
+              Entendido
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 };
@@ -1311,7 +1540,7 @@ const SeccionTerminosJefe = () => {
               </div>
 
               <div className="divide-y divide-border">
-                {etapas.filter(et => et !== "Cerrado").map(etapa => {
+              {etapas.filter(et => et !== "Cerrado" && et !== "Radicado").map(etapa => {
                   const t = terminos[areaActiva]?.[etapa];
                   if (!t) return null;
                   const diasActual = editando[etapa] ?? t.dias;
@@ -1427,7 +1656,6 @@ const SeccionTerminosJefe = () => {
 };
 
 
-/* ── Gestión de Abogados ── */
 interface AbogadoRow {
   id: string;
   full_name: string;
@@ -1435,6 +1663,8 @@ interface AbogadoRow {
   area_id: string | null;
   area_nombre?: string | null;
   phone: string | null;
+  cedula: string | null;
+  direccion: string | null;
   last_sign_in_at: string | null;
   sign_in_count: number | null;
 }
@@ -1453,8 +1683,12 @@ const SeccionAbogados = () => {
   const [showForm, setShowForm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [createRole, setCreateRole] = useState<"abogado" | "cliente">("abogado");
-  const [form, setForm] = useState({
-    full_name: "", email: "", password: "", phone: "", cedula: "", area_id: "",
+  const [expandedCliente, setExpandedCliente] = useState<string | null>(null);
+  const [editingCliente, setEditingCliente] = useState<string | null>(null);
+  const [clienteEditForm, setClienteEditForm] = useState({ full_name: "", phone: "", cedula: "", direccion: "" });
+  const [savingCliente, setSavingCliente] = useState(false);
+ const [form, setForm] = useState({
+    full_name: "", email: "", password: "", phone: "", cedula: "", area_id: "", direccion: "",
   });
 
   const load = async () => {
@@ -1469,7 +1703,7 @@ const SeccionAbogados = () => {
         .maybeSingle();
       if (dirData) {
         setDirector(dirData as any);
-        setDirForm({ full_name: dirData.full_name ?? "", phone: (dirData as any).phone ?? "", cedula: (dirData as any).cedula ?? "" });
+        setDirForm({ full_name: dirData.full_name ?? "", phone: (dirData as any).phone ?? "", cedula: (dirData as any).cedula ?? "", direccion: (dirData as any).direccion ?? "" });
       } else {
         // El perfil del director no existe aún — crearlo
         await supabase.from("profiles").upsert({
@@ -1492,10 +1726,10 @@ const SeccionAbogados = () => {
     setAreas(aData ?? []);
     const ids = (roleRows ?? []).map((r) => r.user_id);
     if (ids.length === 0) { setAbogados([]); setClientes([]); setLoading(false); return; }
-    const { data } = await supabase
+   const { data } = await supabase
       .from("profiles")
-      .select("id, full_name, email, area_id, phone, last_sign_in_at, sign_in_count")
-      .in("id", ids);
+      .select("id, full_name, email, area_id, phone, cedula, direccion, last_sign_in_at, sign_in_count")
+      .in("id", ids); 
     const areaMap = new Map((aData ?? []).map((a) => [a.id, a.nombre]));
     const profMap = new Map(
       (data ?? []).map((p) => [p.id, { ...p, area_nombre: p.area_id ? areaMap.get(p.area_id) ?? null : null }]),
@@ -1534,7 +1768,38 @@ const SeccionAbogados = () => {
     setEditingDirector(false);
     load();
   };
+const iniciarEdicionCliente = (c: AbogadoRow) => {
+    setEditingCliente(c.id);
+    setClienteEditForm({
+      full_name: c.full_name ?? "",
+      phone: c.phone ?? "",
+      cedula: c.cedula ?? "",
+      direccion: c.direccion ?? "",
+    });
+  };
 
+  const cancelarEdicionCliente = () => {
+    setEditingCliente(null);
+    setClienteEditForm({ full_name: "", phone: "", cedula: "", direccion: "" });
+  };
+
+  const guardarCliente = async (clienteId: string) => {
+    setSavingCliente(true);
+    const { error } = await supabase.from("profiles").update({
+      full_name: clienteEditForm.full_name.trim(),
+      phone: clienteEditForm.phone.trim() || null,
+      cedula: clienteEditForm.cedula.trim() || null,
+      direccion: clienteEditForm.direccion.trim() || null,
+    }).eq("id", clienteId);
+    setSavingCliente(false);
+    if (error) {
+      toast({ title: "Error al guardar", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Cliente actualizado", description: "Los datos fueron guardados." });
+    setEditingCliente(null);
+    load();
+  };
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (form.password.length < 8) {
@@ -1546,12 +1811,13 @@ const SeccionAbogados = () => {
       return;
     }
     setSubmitting(true);
-    const payload = {
+   const payload = {
       full_name: form.full_name,
       email: form.email,
       password: form.password,
       phone: form.phone,
       cedula: form.cedula,
+      direccion: createRole === "cliente" ? form.direccion : null,
       area_id: createRole === "abogado" ? form.area_id : null,
       role: createRole,
     };
@@ -1567,7 +1833,7 @@ const SeccionAbogados = () => {
     }
     const label = createRole === "cliente" ? "Cliente" : "Abogado";
     toast({ title: `${label} creado`, description: `${form.full_name} ya puede iniciar sesión.` });
-    setForm({ full_name: "", email: "", password: "", phone: "", cedula: "", area_id: "" });
+  setForm({ full_name: "", email: "", password: "", phone: "", cedula: "", area_id: "", direccion: "" });
     setShowForm(false);
     load();
   };
@@ -1703,6 +1969,12 @@ const SeccionAbogados = () => {
               <Label>Cédula</Label>
               <Input value={form.cedula} onChange={(e) => setForm({ ...form, cedula: e.target.value })} />
             </div>
+              {createRole === "cliente" && (
+              <div className="space-y-1.5">
+                <Label>Dirección física</Label>
+                <Input value={form.direccion} onChange={(e) => setForm({ ...form, direccion: e.target.value })} placeholder="Ciudad, barrio, calle" />
+              </div>
+              )}
           </div>
           <p className="text-[11px] text-muted-foreground">
             La persona podrá cambiar esta contraseña desde su panel después de iniciar sesión.
@@ -1756,24 +2028,94 @@ const SeccionAbogados = () => {
               <div className="bg-card rounded-xl border border-border p-6 text-center">
                 <p className="font-body text-sm text-muted-foreground">Aún no hay clientes registrados.</p>
               </div>
-            ) : (
+           ) : (
               <div className="grid gap-3">
-                {clientes.map((c) => (
-                  <div key={c.id} className="bg-card rounded-xl border border-border p-4 flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-full bg-accent/10 flex items-center justify-center">
-                      <Users className="w-4 h-4 text-accent" />
+                {clientes.map((c) => {
+                  const isExpanded = expandedCliente === c.id;
+                  const isEditing = editingCliente === c.id;
+                  return (
+                    <div key={c.id} className="bg-card rounded-xl border border-border overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => !isEditing && setExpandedCliente(isExpanded ? null : c.id)}
+                        className="w-full p-4 flex items-center gap-4 hover:bg-muted/30 transition-colors text-left"
+                      >
+                        <div className="w-10 h-10 rounded-full bg-accent/10 flex items-center justify-center flex-shrink-0">
+                          <Users className="w-4 h-4 text-accent" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-display text-sm font-semibold text-foreground">{c.full_name}</p>
+                          <p className="font-body text-xs text-muted-foreground truncate">{c.email}{c.phone ? ` · ${c.phone}` : ""}</p>
+                        </div>
+                        <p className="font-body text-[11px] text-muted-foreground text-right hidden md:block">
+                          {c.last_sign_in_at
+                            ? `Último acceso: ${new Date(c.last_sign_in_at).toLocaleString("es-CO", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })}`
+                            : "Sin acceso aún"}
+                        </p>
+                        <ChevronDown className={`w-4 h-4 text-muted-foreground flex-shrink-0 transition-transform ${isExpanded ? "rotate-180" : ""}`} />
+                      </button>
+
+                      {isExpanded && (
+                        <div className="border-t border-border bg-muted/20 p-4">
+                          {isEditing ? (
+                            <div className="space-y-3">
+                              <div className="grid sm:grid-cols-2 gap-3">
+                                <div>
+                                  <Label className="font-body text-xs text-muted-foreground mb-1 block">Nombre completo</Label>
+                                  <Input value={clienteEditForm.full_name} onChange={e => setClienteEditForm(p => ({ ...p, full_name: e.target.value }))} />
+                                </div>
+                                <div>
+                                  <Label className="font-body text-xs text-muted-foreground mb-1 block">Cédula</Label>
+                                  <Input value={clienteEditForm.cedula} onChange={e => setClienteEditForm(p => ({ ...p, cedula: e.target.value }))} />
+                                </div>
+                                <div>
+                                  <Label className="font-body text-xs text-muted-foreground mb-1 block">Celular</Label>
+                                  <Input value={clienteEditForm.phone} onChange={e => setClienteEditForm(p => ({ ...p, phone: e.target.value }))} />
+                                </div>
+                                <div>
+                                  <Label className="font-body text-xs text-muted-foreground mb-1 block">Dirección</Label>
+                                  <Input value={clienteEditForm.direccion} onChange={e => setClienteEditForm(p => ({ ...p, direccion: e.target.value }))} />
+                                </div>
+                              </div>
+                              <div className="flex gap-2 pt-2">
+                                <Button type="button" size="sm" onClick={() => guardarCliente(c.id)} disabled={savingCliente} className="gradient-gold text-primary border-0 font-body text-xs">
+                                  {savingCliente ? "Guardando…" : "Guardar"}
+                                </Button>
+                                <Button type="button" size="sm" variant="outline" onClick={cancelarEdicionCliente} className="font-body text-xs">
+                                  Cancelar
+                                </Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <>
+                              <div className="grid sm:grid-cols-2 gap-3">
+                                <div>
+                                  <p className="font-body text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Cédula</p>
+                                  <p className="font-body text-sm text-foreground">{c.cedula || "—"}</p>
+                                </div>
+                                <div>
+                                  <p className="font-body text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Correo</p>
+                                  <p className="font-body text-sm text-foreground break-all">{c.email}</p>
+                                </div>
+                                <div>
+                                  <p className="font-body text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Celular</p>
+                                  <p className="font-body text-sm text-foreground">{c.phone || "—"}</p>
+                                </div>
+                                <div>
+                                  <p className="font-body text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Dirección</p>
+                                  <p className="font-body text-sm text-foreground">{c.direccion || "—"}</p>
+                                </div>
+                              </div>
+                              <Button type="button" size="sm" variant="outline" onClick={() => iniciarEdicionCliente(c)} className="font-body text-xs mt-3">
+                                Editar datos
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      )}
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-display text-sm font-semibold text-foreground">{c.full_name}</p>
-                      <p className="font-body text-xs text-muted-foreground">{c.email}{c.phone ? ` · ${c.phone}` : ""}</p>
-                    </div>
-                    <p className="font-body text-[11px] text-muted-foreground text-right">
-                      {c.last_sign_in_at
-                        ? `Último acceso: ${new Date(c.last_sign_in_at).toLocaleString("es-CO", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })}`
-                        : "Aún no ha iniciado sesión"}
-                    </p>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -1783,8 +2125,9 @@ const SeccionAbogados = () => {
   );
 };
 
-/* ── Calendario General ── */
 const SeccionCalendarioJefe = () => {
+  const { toast } = useToast();
+  const { user } = useAuth();
   const [eventos, setEventos] = useState<any[]>([]);
   const [abogadosMap, setAbogadosMap] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -1795,45 +2138,86 @@ const SeccionCalendarioJefe = () => {
   const [diaSeleccionado, setDiaSeleccionado] = useState<string | null>(null);
   const [filtro, setFiltro] = useState<string>("todos");
 
+  // Estado formulario audiencia
+  const [showFormAud, setShowFormAud] = useState(false);
+  const [savingAud, setSavingAud] = useState(false);
+  const [editAudId, setEditAudId] = useState<string | null>(null);
+  const [casesAll, setCasesAll] = useState<any[]>([]);
+  const [abogadosList, setAbogadosList] = useState<any[]>([]);
+  const [clientesMap, setClientesMap] = useState<Record<string, { nombre: string; email: string; telefono: string; cedula: string; direccion: string }>>({});
+  const [formAud, setFormAud] = useState({
+    case_id: "", titulo: "", tipo: "", fecha_inicio: "", fecha_fin: "",
+    modalidad: "presencial", enlace_virtual: "", ubicacion: "", notas: "",
+  });
+
+  // Info del caso/cliente seleccionado
+  const casoSeleccionado = casesAll.find(c => c.id === formAud.case_id);
+  const clienteInfo = casoSeleccionado ? clientesMap[casoSeleccionado.cliente_id] : null;
+
+  const resetFormAud = () => {
+    setFormAud({ case_id: "", titulo: "", tipo: "", fecha_inicio: "", fecha_fin: "", modalidad: "presencial", enlace_virtual: "", ubicacion: "", notas: "" });
+    setEditAudId(null);
+    setShowFormAud(false);
+  };
+
   const load = async () => {
     setLoading(true);
-    const [{ data: auds }, { data: acts }, { data: cases }, { data: profs }] = await Promise.all([
-      supabase.from("audiencias").select("id, case_id, titulo, fecha_inicio, modalidad, ubicacion, enlace_virtual"),
+    const [{ data: auds }, { data: acts }, { data: cases }, { data: profs }, { data: roleAbogado }, { data: clProfiles }] = await Promise.all([
+      supabase.from("audiencias").select("id, case_id, titulo, tipo, fecha_inicio, fecha_fin, modalidad, ubicacion, enlace_virtual, notas"),
       supabase.from("actuaciones").select("id, case_id, tipo, descripcion, vence_at, cumplida").eq("cumplida", false).not("vence_at", "is", null),
-      supabase.from("cases").select("id, radicado, cliente_nombre, abogado_id, fecha_vencimiento, etapa, tipo").neq("etapa", "Cerrado"),
-      supabase.from("profiles").select("id, full_name"),
+      supabase.from("cases").select("id, radicado, cliente_nombre, cliente_id, abogado_id, fecha_vencimiento, etapa, tipo").neq("etapa", "Cerrado"),
+      supabase.from("profiles").select("id, full_name, phone, email"),
+      supabase.from("user_roles").select("user_id").eq("role", "abogado"),
+      supabase.from("profiles").select("id, full_name, email, phone, cedula, direccion"),
     ]);
 
     const pm: Record<string, string> = {};
     (profs ?? []).forEach((p: any) => { pm[p.id] = p.full_name; });
     setAbogadosMap(pm);
 
+    // Mapa de clientes
+   // Mapa de clientes
+    const cm: Record<string, { nombre: string; email: string; telefono: string; cedula: string; direccion: string }> = {};
+    (clProfiles ?? []).forEach((p: any) => { cm[p.id] = { nombre: p.full_name, email: p.email ?? "", telefono: p.phone ?? "", cedula: p.cedula ?? "", direccion: p.direccion ?? "" }; });
+    setClientesMap(cm);
+
+    // Abogados
+    const abIds = (roleAbogado ?? []).map((r: any) => r.user_id);
+    setAbogadosList((profs ?? []).filter((p: any) => abIds.includes(p.id)));
+
+    setCasesAll(cases ?? []);
+
     const casosMap: Record<string, any> = {};
     (cases ?? []).forEach((c: any) => { casosMap[c.id] = c; });
 
     const evs: any[] = [];
 
-    // 1. Audiencias
     (auds ?? []).forEach((a: any) => {
       const caso = casosMap[a.case_id];
       if (!caso) return;
       evs.push({
         id: "aud-" + a.id,
+        audId: a.id,
         fecha: a.fecha_inicio.split("T")[0],
         hora: new Date(a.fecha_inicio).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit", hour12: false }),
+        horaFin: a.fecha_fin ? new Date(a.fecha_fin).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit", hour12: false }) : null,
         titulo: a.titulo,
+        tipoAud: a.tipo,
         tipo: "audiencia",
         radicado: caso.radicado,
         tipoCaso: caso.tipo,
         cliente: caso.cliente_nombre,
+        clienteId: caso.cliente_id,
         abogado_id: caso.abogado_id,
         modalidad: a.modalidad,
         enlace: a.enlace_virtual,
         ubicacion: a.ubicacion,
+        notas: a.notas,
+        rawAud: a,
+        rawCaso: caso,
       });
     });
 
-    // 2. Actuaciones con vencimiento (entregas, memoriales, oficios, términos)
     (acts ?? []).forEach((a: any) => {
       const caso = casosMap[a.case_id];
       if (!caso || !a.vence_at) return;
@@ -1853,7 +2237,6 @@ const SeccionCalendarioJefe = () => {
       });
     });
 
-    // 3. Fechas de vencimiento de casos
     (cases ?? []).forEach((c: any) => {
       if (!c.fecha_vencimiento) return;
       evs.push({
@@ -1872,6 +2255,63 @@ const SeccionCalendarioJefe = () => {
     evs.sort((a, b) => a.fecha.localeCompare(b.fecha) || a.hora.localeCompare(b.hora));
     setEventos(evs);
     setLoading(false);
+  };
+
+  const guardarAudiencia = async () => {
+    if (!formAud.case_id || !formAud.titulo || !formAud.fecha_inicio || !user) {
+      toast({ title: "Faltan datos", description: "Caso, título y fecha de inicio son obligatorios.", variant: "destructive" });
+      return;
+    }
+    setSavingAud(true);
+    const payload: any = {
+      case_id: formAud.case_id,
+      titulo: formAud.titulo,
+      tipo: formAud.tipo || null,
+      fecha_inicio: formAud.fecha_inicio,
+      fecha_fin: formAud.fecha_fin || null,
+      modalidad: formAud.modalidad,
+      enlace_virtual: formAud.enlace_virtual || null,
+      ubicacion: formAud.ubicacion || null,
+      notas: formAud.notas || null,
+      created_by: user.id,
+    };
+    let error;
+    if (editAudId) {
+      ({ error } = await supabase.from("audiencias").update(payload).eq("id", editAudId));
+    } else {
+      ({ error } = await supabase.from("audiencias").insert(payload));
+    }
+    setSavingAud(false);
+    if (error) { toast({ title: "Error al guardar", description: error.message, variant: "destructive" }); return; }
+    toast({ title: editAudId ? "Audiencia actualizada" : "Audiencia creada" });
+    resetFormAud();
+    load();
+  };
+
+  const eliminarAudiencia = async (audId: string) => {
+    if (!confirm("¿Eliminar esta audiencia?")) return;
+    const { error } = await supabase.from("audiencias").delete().eq("id", audId);
+    if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
+    toast({ title: "Audiencia eliminada" });
+    load();
+  };
+
+  const editarAudiencia = (ev: any) => {
+    const a = ev.rawAud;
+    setFormAud({
+      case_id: a.case_id ?? "",
+      titulo: a.titulo ?? "",
+      tipo: a.tipo ?? "",
+      fecha_inicio: a.fecha_inicio ? a.fecha_inicio.slice(0, 16) : "",
+      fecha_fin: a.fecha_fin ? a.fecha_fin.slice(0, 16) : "",
+      modalidad: a.modalidad ?? "presencial",
+      enlace_virtual: a.enlace_virtual ?? "",
+      ubicacion: a.ubicacion ?? "",
+      notas: a.notas ?? "",
+    });
+    setEditAudId(a.id);
+    setShowFormAud(true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   useEffect(() => { load(); }, []);
@@ -1947,16 +2387,33 @@ const SeccionCalendarioJefe = () => {
                 {ev.ubicacion ? ` · ${ev.ubicacion}` : ""}
               </p>
             )}
+            {ev.tipoAud && (
+              <p className="font-body text-xs text-muted-foreground">
+                Tipo: <span className="font-medium text-foreground">{ev.tipoAud}</span>
+              </p>
+            )}
+            {ev.notas && (
+              <p className="font-body text-xs text-muted-foreground italic">{ev.notas}</p>
+            )}
             {ev.enlace && (
-              <a
-                href={ev.enlace}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 font-body text-xs px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors"
-              >
+              <a href={ev.enlace} target="_blank" rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 font-body text-xs px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors">
+                <Video className="w-3 h-3" />
                 Unirse a la audiencia virtual
               </a>
             )}
+            <div className="flex gap-2 pt-1">
+              <Button type="button" size="sm" variant="outline"
+                className="font-body text-xs gap-1 h-7"
+                onClick={() => editarAudiencia(ev)}>
+                ✏️ Editar
+              </Button>
+              <Button type="button" size="sm" variant="outline"
+                className="font-body text-xs gap-1 h-7 text-destructive hover:bg-destructive/10 border-destructive/30"
+                onClick={() => eliminarAudiencia(ev.audId)}>
+                🗑️ Eliminar
+              </Button>
+            </div>
           </div>
         )}
       </div>
@@ -1965,7 +2422,132 @@ const SeccionCalendarioJefe = () => {
 
   return (
     <>
-      <SectionHeader title="Calendario General" description="Audiencias con link, entregas de documentos y vencimientos de todos los casos activos" />
+      <div className="flex items-center justify-between mb-8 gap-3 flex-wrap">
+        <div>
+          <h1 className="font-display text-3xl font-bold text-foreground">Calendario General</h1>
+          <p className="font-body text-sm text-muted-foreground mt-2">Audiencias, entregas y vencimientos de todos los casos activos</p>
+        </div>
+        <Button type="button"
+          className="gradient-gold text-primary border-0 font-body font-semibold shadow-gold hover:opacity-90 gap-1.5"
+          onClick={() => { resetFormAud(); setShowFormAud(v => !v); }}>
+          <CalendarDays className="w-4 h-4" />
+          {showFormAud ? "Cancelar" : "Nueva audiencia"}
+        </Button>
+      </div>
+
+      {/* Formulario crear / editar audiencia */}
+      {showFormAud && (
+        <div className="bg-card rounded-xl border border-accent/30 p-5 mb-6 space-y-4">
+          <p className="font-display text-sm font-semibold text-foreground">{editAudId ? "Editar audiencia" : "Nueva audiencia"}</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+            {/* Caso */}
+            <div className="md:col-span-2">
+              <Label className="font-body text-xs text-muted-foreground mb-1 block">Caso *</Label>
+              <select value={formAud.case_id}
+                onChange={e => setFormAud(p => ({ ...p, case_id: e.target.value }))}
+                className="w-full h-9 rounded-md border border-input bg-background px-3 font-body text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/40">
+                <option value="">Selecciona un caso…</option>
+                {casesAll.map((c: any) => (
+                  <option key={c.id} value={c.id}>#{c.radicado} — {c.cliente_nombre} · {c.tipo}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Info del caso y cliente (solo lectura) */}
+            {casoSeleccionado && (
+              <div className="md:col-span-2 grid sm:grid-cols-3 gap-3 bg-muted/30 rounded-xl p-4">
+                <div>
+                  <p className="font-body text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Abogado asignado</p>
+                  <p className="font-body text-sm text-foreground font-medium">{abogadosMap[casoSeleccionado.abogado_id] ?? "Sin asignar"}</p>
+                </div>
+               <div>
+                  <p className="font-body text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Cliente</p>
+                  <p className="font-body text-sm text-foreground font-medium">{casoSeleccionado.cliente_nombre}</p>
+                  {clienteInfo?.cedula && <p className="font-body text-xs text-muted-foreground">CC {clienteInfo.cedula}</p>}
+                  {clienteInfo?.email && <p className="font-body text-xs text-muted-foreground break-all">{clienteInfo.email}</p>}
+                  {clienteInfo?.telefono && <p className="font-body text-xs text-muted-foreground">{clienteInfo.telefono}</p>}
+                  {clienteInfo?.direccion && <p className="font-body text-xs text-muted-foreground">{clienteInfo.direccion}</p>}
+                </div>
+                <div>
+                  <p className="font-body text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Tipo de proceso</p>
+                  <p className="font-body text-sm text-foreground font-medium">{casoSeleccionado.tipo}</p>
+                  <p className="font-body text-xs text-muted-foreground">Etapa: {casoSeleccionado.etapa}</p>
+                </div>
+              </div>
+            )}
+
+            {/* Título */}
+            <div className="md:col-span-2">
+              <Label className="font-body text-xs text-muted-foreground mb-1 block">Título *</Label>
+              <Input value={formAud.titulo} onChange={e => setFormAud(p => ({ ...p, titulo: e.target.value }))}
+                placeholder="Ej: Audiencia inicial, Audiencia de pruebas…" />
+            </div>
+
+            {/* Tipo */}
+            <div>
+              <Label className="font-body text-xs text-muted-foreground mb-1 block">Tipo de audiencia</Label>
+              <Input value={formAud.tipo} onChange={e => setFormAud(p => ({ ...p, tipo: e.target.value }))}
+                placeholder="Ej: Preliminar, Oral, Conciliación…" />
+            </div>
+
+            {/* Modalidad */}
+            <div>
+              <Label className="font-body text-xs text-muted-foreground mb-1 block">Modalidad</Label>
+              <select value={formAud.modalidad}
+                onChange={e => setFormAud(p => ({ ...p, modalidad: e.target.value }))}
+                className="w-full h-9 rounded-md border border-input bg-background px-3 font-body text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/40">
+                <option value="presencial">Presencial</option>
+                <option value="virtual">Virtual</option>
+                <option value="mixta">Mixta</option>
+              </select>
+            </div>
+
+            {/* Fecha inicio */}
+            <div>
+              <Label className="font-body text-xs text-muted-foreground mb-1 block">Fecha y hora inicio *</Label>
+              <Input type="datetime-local" value={formAud.fecha_inicio}
+                onChange={e => setFormAud(p => ({ ...p, fecha_inicio: e.target.value }))} />
+            </div>
+
+            {/* Fecha fin */}
+            <div>
+              <Label className="font-body text-xs text-muted-foreground mb-1 block">Fecha y hora fin</Label>
+              <Input type="datetime-local" value={formAud.fecha_fin}
+                onChange={e => setFormAud(p => ({ ...p, fecha_fin: e.target.value }))} />
+            </div>
+
+            {/* Ubicación */}
+            <div>
+              <Label className="font-body text-xs text-muted-foreground mb-1 block">Ubicación / Sala</Label>
+              <Input value={formAud.ubicacion} onChange={e => setFormAud(p => ({ ...p, ubicacion: e.target.value }))}
+                placeholder="Ej: Sala 3, Juzgado 5 Civil…" />
+            </div>
+
+            {/* Enlace virtual */}
+            <div>
+              <Label className="font-body text-xs text-muted-foreground mb-1 block">Enlace virtual</Label>
+              <Input value={formAud.enlace_virtual} onChange={e => setFormAud(p => ({ ...p, enlace_virtual: e.target.value }))}
+                placeholder="https://meet.google.com/…" />
+            </div>
+
+            {/* Notas */}
+            <div className="md:col-span-2">
+              <Label className="font-body text-xs text-muted-foreground mb-1 block">Notas internas</Label>
+              <Textarea value={formAud.notas} onChange={e => setFormAud(p => ({ ...p, notas: e.target.value }))}
+                placeholder="Observaciones para el equipo…" rows={2} className="resize-none" />
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-1">
+            <Button type="button" variant="outline" onClick={resetFormAud} className="font-body text-xs">Cancelar</Button>
+            <Button type="button" onClick={guardarAudiencia} disabled={savingAud}
+              className="gradient-gold text-primary border-0 font-body font-semibold shadow-gold hover:opacity-90">
+              {savingAud ? "Guardando…" : editAudId ? "Guardar cambios" : "Crear audiencia"}
+            </Button>
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <p className="font-body text-sm text-muted-foreground">Cargando calendario…</p>
@@ -2116,87 +2698,370 @@ const SeccionCalendarioJefe = () => {
   );
 };
 
-
 /* ── Analítica (dashboard real con gráficos) ── */
 const SeccionAnaliticaJefe = () => {
-  const [casos, setCasos] = useState<{ id: string; etapa: string; tipo: string; abogado_id: string | null; created_at: string; urgente: boolean; area_id: string | null }[]>([]);
+  const [casos, setCasos] = useState<any[]>([]);
+  const [actuaciones, setActuaciones] = useState<any[]>([]);
+  const [audiencias, setAudiencias] = useState<any[]>([]);
   const [profs, setProfs] = useState<Record<string, string>>({});
   const [areas, setAreas] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
+  const [tabAnalitica, setTabAnalitica] = useState<"general" | "abogados">("general");
+  const [abogadoSeleccionado, setAbogadoSeleccionado] = useState<string>("todos");
+  const [ultimaActualizacion, setUltimaActualizacion] = useState<Date>(new Date());
+
+  const cargarDatos = async () => {
+    const [{ data: cs }, { data: ps }, { data: ars }, { data: acts }, { data: auds }] = await Promise.all([
+      supabase.from("cases").select("id, etapa, tipo, abogado_id, created_at, urgente, area_id, fecha_vencimiento, cliente_nombre"),
+      supabase.from("profiles").select("id, full_name"),
+      supabase.from("areas_derecho").select("id, nombre"),
+      supabase.from("actuaciones").select("id, case_id, cumplida, vence_at, created_at"),
+      supabase.from("audiencias").select("id, case_id, fecha_inicio"),
+    ]);
+    setCasos((cs ?? []) as any);
+    setActuaciones((acts ?? []) as any);
+    setAudiencias((auds ?? []) as any);
+    const pm: Record<string, string> = {}; (ps ?? []).forEach((p: any) => { pm[p.id] = p.full_name; }); setProfs(pm);
+    const am: Record<string, string> = {}; (ars ?? []).forEach((a: any) => { am[a.id] = a.nombre; }); setAreas(am);
+    setUltimaActualizacion(new Date());
+    setLoading(false);
+  };
 
   useEffect(() => {
-    (async () => {
-      const [{ data: cs }, { data: ps }, { data: ars }] = await Promise.all([
-        supabase.from("cases").select("id, etapa, tipo, abogado_id, created_at, urgente, area_id"),
-        supabase.from("profiles").select("id, full_name"),
-        supabase.from("areas_derecho").select("id, nombre"),
-      ]);
-      setCasos((cs ?? []) as any);
-      const pm: Record<string, string> = {}; (ps ?? []).forEach((p: any) => { pm[p.id] = p.full_name; }); setProfs(pm);
-      const am: Record<string, string> = {}; (ars ?? []).forEach((a: any) => { am[a.id] = a.nombre; }); setAreas(am);
-      setLoading(false);
-    })();
+    cargarDatos();
+    const ch = supabase.channel("analitica-realtime")
+      .on("postgres_changes", { event: "*", schema: "public", table: "cases" }, cargarDatos)
+      .on("postgres_changes", { event: "*", schema: "public", table: "actuaciones" }, cargarDatos)
+      .on("postgres_changes", { event: "*", schema: "public", table: "audiencias" }, cargarDatos)
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
   }, []);
 
+  const hoy = new Date();
   const total = casos.length;
   const activos = casos.filter(c => c.etapa !== "Cerrado").length;
   const cerrados = casos.filter(c => c.etapa === "Cerrado").length;
-  const urgentes = casos.filter(c => c.urgente).length;
+  const urgentes = casos.filter(c => c.urgente && c.etapa !== "Cerrado").length;
+  const tasaCierre = total > 0 ? Math.round((cerrados / total) * 100) : 0;
+  const vencenProx7 = casos.filter(c => {
+    if (!c.fecha_vencimiento || c.etapa === "Cerrado") return false;
+    const dias = Math.ceil((new Date(c.fecha_vencimiento).getTime() - hoy.getTime()) / 86400000);
+    return dias >= 0 && dias <= 7;
+  }).length;
 
-  const porEtapa = Object.entries(casos.reduce<Record<string, number>>((acc, c) => { acc[c.etapa] = (acc[c.etapa] ?? 0) + 1; return acc; }, {})).map(([name, value]) => ({ name, value }));
-  const porArea = Object.entries(casos.reduce<Record<string, number>>((acc, c) => { const k = areas[c.area_id ?? ""] ?? c.tipo ?? "Sin área"; acc[k] = (acc[k] ?? 0) + 1; return acc; }, {})).map(([name, value]) => ({ name, value }));
-  const porAbogado = Object.entries(casos.reduce<Record<string, number>>((acc, c) => { if (!c.abogado_id) return acc; const k = profs[c.abogado_id] ?? "—"; acc[k] = (acc[k] ?? 0) + 1; return acc; }, {})).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 8);
+  // ── Vista general ──
+  const ETAPAS_ORDEN = ["Creación", "Proyección", "Recaudo Probatorio", "Revisión", "Firma"];
+  const conteoEtapa = casos.filter(c => c.etapa !== "Cerrado").reduce<Record<string, number>>((acc, c) => {
+    acc[c.etapa] = (acc[c.etapa] ?? 0) + 1; return acc;
+  }, {});
+  const porEtapa = ETAPAS_ORDEN.map(name => ({ name, value: conteoEtapa[name] ?? 0 }));
 
-  // Casos creados por mes (últimos 6 meses)
+  // Todas las áreas del catálogo siempre aparecen con su nombre real, con 0 si no tienen casos activos
+  const conteoAreaPorId = casos.filter(c => c.etapa !== "Cerrado").reduce<Record<string, number>>((acc, c) => {
+    const k = c.area_id ?? "__sin_area__"; acc[k] = (acc[k] ?? 0) + 1; return acc;
+  }, {});
+  const sinAreaCount = conteoAreaPorId["__sin_area__"] ?? 0;
+  // areas es Record<id, nombre> — siempre mostramos todas las áreas aunque tengan 0 casos
+  const porArea: { name: string; value: number }[] = [
+    ...Object.entries(areas).map(([id, nombre]) => ({ name: nombre || "Sin nombre", value: conteoAreaPorId[id] ?? 0 })),
+    ...(sinAreaCount > 0 ? [{ name: "Sin área", value: sinAreaCount }] : []),
+  ].sort((a, b) => b.value - a.value);
+
   const meses: { name: string; value: number }[] = [];
-  const now = new Date();
   for (let i = 5; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const d = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);
     const label = d.toLocaleDateString("es-CO", { month: "short", year: "2-digit" });
     const count = casos.filter(c => { const cd = new Date(c.created_at); return cd.getFullYear() === d.getFullYear() && cd.getMonth() === d.getMonth(); }).length;
     meses.push({ name: label, value: count });
   }
 
+  // ── Por abogado ──
+  const PROJ_COLORS = ["#6366f1", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4", "#ec4899", "#84cc16"];
+  const abogadoIds = [...new Set(casos.filter(c => c.abogado_id).map(c => c.abogado_id as string))];
+
+  const statsAbogado = abogadoIds.map(id => {
+    const nombre = profs[id] ?? "Sin nombre";
+    const misCasos = casos.filter(c => c.abogado_id === id);
+    const casosActivos = misCasos.filter(c => c.etapa !== "Cerrado").length;
+    const casosCerrados = misCasos.filter(c => c.etapa === "Cerrado").length;
+    const casosUrgentes = misCasos.filter(c => c.urgente && c.etapa !== "Cerrado").length;
+    const misActuaciones = actuaciones.filter(a => misCasos.some(c => c.id === a.case_id));
+    const actCumplidas = misActuaciones.filter(a => a.cumplida).length;
+    const actTotal = misActuaciones.length;
+    const eficiencia = actTotal > 0 ? Math.round((actCumplidas / actTotal) * 100) : null;
+    const misAudiencias = audiencias.filter(a => misCasos.some(c => c.id === a.case_id));
+    const audProximas = misAudiencias.filter(a => new Date(a.fecha_inicio) >= hoy).length;
+    const vencenProx = misCasos.filter(c => {
+      if (!c.fecha_vencimiento || c.etapa === "Cerrado") return false;
+      const dias = Math.ceil((new Date(c.fecha_vencimiento).getTime() - hoy.getTime()) / 86400000);
+      return dias >= 0 && dias <= 7;
+    }).length;
+    const proyMensual: { name: string; value: number }[] = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);
+      const label = d.toLocaleDateString("es-CO", { month: "short", year: "2-digit" });
+      const hasta = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+      const count = misCasos.filter(c => new Date(c.created_at) <= hasta && c.etapa !== "Cerrado").length;
+      proyMensual.push({ name: label, value: count });
+    }
+    return { id, nombre, activos: casosActivos, cerrados: casosCerrados, urgentes: casosUrgentes, eficiencia, audProximas, vencenProx, total: misCasos.length, proyMensual };
+  }).sort((a, b) => b.activos - a.activos);
+
+  // Para la gráfica horizontal usamos el nombre completo; si no hay abogados con casos el array está vacío
+  const cargaAbogado = statsAbogado.length > 0
+    ? statsAbogado.map(a => ({ name: a.nombre, value: a.activos }))
+    : [{ name: "Sin datos", value: 0 }];
+
+  const proyAbogadoMensual: { name: string; [key: string]: any }[] = [];
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);
+    const label = d.toLocaleDateString("es-CO", { month: "short", year: "2-digit" });
+    const punto: { name: string; [key: string]: any } = { name: label };
+    if (abogadoSeleccionado === "todos") {
+      statsAbogado.forEach(a => { punto[a.nombre] = a.proyMensual[5 - i]?.value ?? 0; });
+    } else {
+      const ab = statsAbogado.find(a => a.id === abogadoSeleccionado);
+      if (ab) punto[ab.nombre] = ab.proyMensual[5 - i]?.value ?? 0;
+    }
+    proyAbogadoMensual.push(punto);
+  }
+  const proyLineKeys = abogadoSeleccionado === "todos"
+    ? statsAbogado.map(a => a.nombre)
+    : statsAbogado.filter(a => a.id === abogadoSeleccionado).map(a => a.nombre);
+
   const kpis = [
     { label: "Casos Totales", value: total, color: "from-indigo-500 to-violet-500", icon: Briefcase },
     { label: "Casos Activos", value: activos, color: "from-emerald-500 to-teal-500", icon: TrendingUp },
-    { label: "Casos Cerrados", value: cerrados, color: "from-sky-500 to-cyan-500", icon: Check },
-    { label: "Urgentes", value: urgentes, color: "from-rose-500 to-orange-500", icon: AlertTriangle },
+    { label: "Tasa de cierre", value: `${tasaCierre}%`, color: "from-sky-500 to-cyan-500", icon: Check },
+    { label: "Urgentes activos", value: urgentes, color: "from-rose-500 to-orange-500", icon: AlertTriangle },
+    { label: "Vencen en 7 días", value: vencenProx7, color: "from-amber-500 to-yellow-500", icon: Clock },
+    { label: "Casos cerrados", value: cerrados, color: "from-violet-500 to-purple-500", icon: CheckCircle2 },
   ];
+
+  const EficienciaBar = ({ value }: { value: number | null }) => {
+    if (value === null) return <span className="font-body text-xs text-muted-foreground">Sin datos</span>;
+    const color = value >= 80 ? "bg-emerald-500" : value >= 50 ? "bg-amber-500" : "bg-rose-500";
+    return (
+      <div className="flex items-center gap-2 w-full">
+        <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+          <div className={`h-full rounded-full ${color}`} style={{ width: `${value}%` }} />
+        </div>
+        <span className="font-body text-xs font-medium text-foreground w-8 text-right">{value}%</span>
+      </div>
+    );
+  };
 
   return (
     <>
-      <SectionHeader title="Analítica y KPIs" description="Indicadores en tiempo real del bufete" />
+      <div className="flex items-end justify-between mb-8 gap-3 flex-wrap">
+        <div>
+          <h1 className="font-display text-3xl font-bold text-foreground">Analítica y KPIs</h1>
+          <p className="font-body text-sm text-muted-foreground mt-1">
+            Datos en tiempo real · Última actualización:{" "}
+            <span className="text-foreground font-medium">
+              {ultimaActualizacion.toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })}
+            </span>
+          </p>
+        </div>
+        <button type="button" onClick={cargarDatos}
+          className="flex items-center gap-2 font-body text-xs px-3 py-2 rounded-lg border border-border hover:bg-muted/50 transition-colors text-muted-foreground hover:text-foreground">
+          <TrendingUp className="w-3.5 h-3.5" />
+          Actualizar
+        </button>
+      </div>
+
       {loading ? <p className="font-body text-sm text-muted-foreground">Cargando…</p> : (
         <>
-          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          {/* KPIs */}
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-6">
             {kpis.map((k) => (
-              <div key={k.label} className={`rounded-xl p-5 text-white shadow-luxury bg-gradient-to-br ${k.color}`}>
-                <div className="flex items-center justify-between">
-                  <p className="font-body text-xs uppercase tracking-wider opacity-80">{k.label}</p>
-                  <k.icon className="w-4 h-4 opacity-80" />
+              <div key={k.label} className={`rounded-xl p-4 text-white shadow-luxury bg-gradient-to-br ${k.color}`}>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="font-body text-[10px] uppercase tracking-wider opacity-80">{k.label}</p>
+                  <k.icon className="w-3.5 h-3.5 opacity-80" />
                 </div>
-                <p className="font-display text-3xl font-bold mt-2">{k.value}</p>
+                <p className="font-display text-2xl font-bold">{k.value}</p>
               </div>
             ))}
           </div>
 
-          <div className="grid lg:grid-cols-2 gap-4 mb-4">
-            <ChartCard title="Casos por Etapa">
-              <RPieChart data={porEtapa} />
-            </ChartCard>
-            <ChartCard title="Casos por Área de Derecho">
-              <RBarChart data={porArea} />
-            </ChartCard>
+          {/* Tabs */}
+          <div className="flex gap-2 mb-6 border-b border-border">
+            {([
+              { id: "general", label: "Vista general" },
+              { id: "abogados", label: "Proyección por abogado" },
+            ] as const).map(t => (
+              <button key={t.id} type="button" onClick={() => setTabAnalitica(t.id)}
+                className={`font-body text-sm px-4 py-2 border-b-2 transition-colors ${tabAnalitica === t.id ? "border-accent text-foreground font-medium" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
+                {t.label}
+              </button>
+            ))}
           </div>
-          <div className="grid lg:grid-cols-2 gap-4">
-            <ChartCard title="Carga por Abogado">
-              <RBarChart data={porAbogado} horizontal />
-            </ChartCard>
-            <ChartCard title="Casos creados (últimos 6 meses)">
-              <RLineChart data={meses} />
-            </ChartCard>
-          </div>
+
+          {tabAnalitica === "general" ? (
+            <>
+              <div className="grid lg:grid-cols-2 gap-4 mb-4">
+                <ChartCard title="Casos activos por etapa">
+                  <RPieChart data={porEtapa} />
+                </ChartCard>
+                <div className="bg-card rounded-xl border border-border p-5">
+                  <p className="font-display text-base font-semibold text-foreground mb-4">Casos activos por área de derecho</p>
+                  {porArea.length === 0 ? (
+                    <div className="h-full flex items-center justify-center text-xs text-muted-foreground">Sin áreas registradas</div>
+                  ) : (
+                    <div className="space-y-3">
+                      {(() => {
+                        const max = Math.max(...porArea.map(d => d.value), 1);
+                        return porArea.map((d, i) => (
+                          <div key={d.name} className="flex items-center gap-3">
+                            <span className="font-body text-xs text-muted-foreground w-36 text-right flex-shrink-0 truncate" title={d.name}>{d.name}</span>
+                            <div className="flex-1 h-7 bg-muted/40 rounded-lg overflow-hidden">
+                              <div
+                                className="h-full rounded-lg flex items-center px-2 transition-all duration-500"
+                                style={{
+                                  width: d.value === 0 ? "3px" : `${Math.max(4, (d.value / max) * 100)}%`,
+                                  background: ["#6366f1","#10b981","#f59e0b","#ef4444","#8b5cf6","#06b6d4","#ec4899","#84cc16"][i % 8],
+                                  opacity: d.value === 0 ? 0.25 : 1,
+                                }}
+                              />
+                            </div>
+                            <span className="font-display text-xs font-bold text-foreground w-4 flex-shrink-0">{d.value}</span>
+                          </div>
+                        ));
+                      })()}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="grid gap-4">
+                <ChartCard title="Nuevos casos por mes (últimos 6 meses)">
+                  <RLineChart data={meses} />
+                </ChartCard>
+              </div>
+            </>
+          ) : (
+            <>
+              {/* Selector de abogado */}
+              <div className="flex items-center gap-3 mb-5 flex-wrap">
+                <p className="font-body text-sm text-muted-foreground">Filtrar proyección:</p>
+                <div className="flex gap-2 flex-wrap">
+                  <button type="button" onClick={() => setAbogadoSeleccionado("todos")}
+                    className={`font-body text-xs px-3 py-1.5 rounded-full border transition-colors ${abogadoSeleccionado === "todos" ? "border-accent bg-accent/10 text-foreground font-medium" : "border-border text-muted-foreground hover:border-accent/40"}`}>
+                    Todos
+                  </button>
+                  {statsAbogado.map((a, i) => (
+                    <button key={a.id} type="button" onClick={() => setAbogadoSeleccionado(a.id)}
+                      className={`font-body text-xs px-3 py-1.5 rounded-full border transition-colors flex items-center gap-1.5 ${abogadoSeleccionado === a.id ? "border-accent bg-accent/10 text-foreground font-medium" : "border-border text-muted-foreground hover:border-accent/40"}`}>
+                      <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: PROJ_COLORS[i % PROJ_COLORS.length] }} />
+                      {a.nombre}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Gráfica de proyección mensual */}
+              <div className="mb-4">
+                <ChartCard title={`Evolución de casos activos — últimos 6 meses${abogadoSeleccionado !== "todos" ? ` · ${statsAbogado.find(a => a.id === abogadoSeleccionado)?.nombre ?? ""}` : " · todos los abogados"}`}>
+                  <RMultiLineChart data={proyAbogadoMensual} lineKeys={proyLineKeys} colors={PROJ_COLORS} />
+                </ChartCard>
+              </div>
+
+              <div className="mb-4">
+                <div className="bg-card rounded-xl border border-border p-5">
+                  <p className="font-display text-base font-semibold text-foreground mb-4">Carga actual por abogado (casos activos)</p>
+                  <div className="space-y-3 mt-2">
+                    {(() => {
+                      const max = Math.max(...cargaAbogado.map(d => d.value), 1);
+                      return cargaAbogado.map((d, i) => (
+                        <div key={d.name} className="flex items-center gap-3">
+                          <span className="font-body text-xs text-muted-foreground w-36 text-right flex-shrink-0 truncate">{d.name}</span>
+                          <div className="flex-1 h-7 bg-muted/40 rounded-lg overflow-hidden">
+                            <div
+                              className="h-full rounded-lg flex items-center px-2 transition-all duration-500"
+                              style={{
+                                width: `${Math.max(4, (d.value / max) * 100)}%`,
+                                background: ["#6366f1","#10b981","#f59e0b","#ef4444","#8b5cf6","#06b6d4","#ec4899","#84cc16"][i % 8],
+                              }}
+                            >
+                              <span className="font-display text-xs font-bold text-white">{d.value}</span>
+                            </div>
+                          </div>
+                        </div>
+                      ));
+                    })()}
+                  </div>
+                </div>
+              </div>
+
+              {/* Tabla detallada */}
+              <div className="bg-card rounded-xl border border-border overflow-hidden">
+                <div className="p-4 border-b border-border">
+                  <p className="font-display text-base font-semibold text-foreground">Detalle por abogado</p>
+                  <p className="font-body text-xs text-muted-foreground">Carga real, eficiencia en actuaciones, audiencias próximas y términos por vencer</p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-border bg-muted/30">
+                        <th className="text-left px-4 py-3 font-body text-xs text-muted-foreground uppercase tracking-wider">Abogado</th>
+                        <th className="text-center px-3 py-3 font-body text-xs text-muted-foreground uppercase tracking-wider">Total</th>
+                        <th className="text-center px-3 py-3 font-body text-xs text-muted-foreground uppercase tracking-wider">Activos</th>
+                        <th className="text-center px-3 py-3 font-body text-xs text-muted-foreground uppercase tracking-wider">Cerrados</th>
+                        <th className="text-center px-3 py-3 font-body text-xs text-muted-foreground uppercase tracking-wider">Urgentes</th>
+                        <th className="text-center px-3 py-3 font-body text-xs text-muted-foreground uppercase tracking-wider">Aud. próximas</th>
+                        <th className="text-center px-3 py-3 font-body text-xs text-muted-foreground uppercase tracking-wider">Vencen ≤7d</th>
+                        <th className="px-4 py-3 font-body text-xs text-muted-foreground uppercase tracking-wider">Eficiencia act.</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {statsAbogado.map((a, i) => (
+                        <tr key={a.id}
+                          className={`hover:bg-muted/20 transition-colors cursor-pointer ${abogadoSeleccionado === a.id ? "bg-accent/5" : ""}`}
+                          onClick={() => setAbogadoSeleccionado(abogadoSeleccionado === a.id ? "todos" : a.id)}>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0"
+                                style={{ background: PROJ_COLORS[i % PROJ_COLORS.length] }}>
+                                <span className="font-display text-xs font-bold text-white">{a.nombre.charAt(0).toUpperCase()}</span>
+                              </div>
+                              <p className="font-body text-sm font-medium text-foreground">{a.nombre}</p>
+                            </div>
+                          </td>
+                          <td className="px-3 py-3 text-center"><span className="font-body text-sm text-muted-foreground">{a.total}</span></td>
+                          <td className="px-3 py-3 text-center"><span className="font-display text-sm font-bold text-foreground">{a.activos}</span></td>
+                          <td className="px-3 py-3 text-center"><span className="font-body text-sm text-muted-foreground">{a.cerrados}</span></td>
+                          <td className="px-3 py-3 text-center">
+                            {a.urgentes > 0
+                              ? <span className="font-body text-xs px-2 py-0.5 rounded-full bg-destructive/10 text-destructive font-medium">{a.urgentes}</span>
+                              : <span className="font-body text-xs text-muted-foreground">—</span>}
+                          </td>
+                          <td className="px-3 py-3 text-center">
+                            {a.audProximas > 0
+                              ? <span className="font-body text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium">{a.audProximas}</span>
+                              : <span className="font-body text-xs text-muted-foreground">—</span>}
+                          </td>
+                          <td className="px-3 py-3 text-center">
+                            {a.vencenProx > 0
+                              ? <span className="font-body text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">{a.vencenProx}</span>
+                              : <span className="font-body text-xs text-muted-foreground">—</span>}
+                          </td>
+                          <td className="px-4 py-3 min-w-[140px]"><EficienciaBar value={a.eficiencia} /></td>
+                        </tr>
+                      ))}
+                      {statsAbogado.length === 0 && (
+                        <tr><td colSpan={8} className="px-4 py-8 text-center font-body text-sm text-muted-foreground">No hay abogados con casos asignados.</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                {statsAbogado.length > 0 && (
+                  <div className="px-4 py-2 border-t border-border bg-muted/20">
+                    <p className="font-body text-xs text-muted-foreground">Haz clic en una fila para filtrar la gráfica de proyección por ese abogado.</p>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
         </>
       )}
     </>
@@ -2214,133 +3079,218 @@ const ChartCard = ({ title, children }: { title: string; children: React.ReactNo
 const SeccionComentariosJefe = () => {
   const { user } = useAuth();
   const { toast } = useToast();
-  const [comentarios, setComentarios] = useState<any[]>([]);
-  const [casos, setCasos] = useState<{ id: string; radicado: string; cliente_nombre: string }[]>([]);
-  const [abogadosMap, setAbogadosMap] = useState<Record<string, string>>({});
-  const [casoFiltro, setCasoFiltro] = useState("todos");
-  const [nuevo, setNuevo] = useState("");
-  const [casoId, setCasoId] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [loading, setLoading] = useState(true);
 
-  const load = async () => {
-    setLoading(true);
-    const [{ data: coms }, { data: casosData }, { data: profs }] = await Promise.all([
-      supabase.from("case_comments").select("id, texto, author_id, abogado_id, case_id, created_at").order("created_at", { ascending: false }),
-      supabase.from("cases").select("id, radicado, cliente_nombre, abogado_id").neq("etapa", "Cerrado"),
-      supabase.from("profiles").select("id, full_name"),
-    ]);
-    const pm: Record<string, string> = {};
-    (profs ?? []).forEach((p: any) => { pm[p.id] = p.full_name; });
-    setAbogadosMap(pm);
-    setCasos((casosData ?? []) as any);
-    const casosMap: Record<string, any> = {};
-    (casosData ?? []).forEach((c: any) => { casosMap[c.id] = c; });
-    const enriched = (coms ?? []).map((c: any) => ({ ...c, caso: casosMap[c.case_id], autor_nombre: pm[c.author_id] ?? "Usuario" }));
-    setComentarios(enriched);
-    setLoading(false);
+  const [casos, setCasos] = useState<{ id: string; radicado: string; cliente_nombre: string; abogado_id: string | null }[]>([]);
+  const [casoSeleccionado, setCasoSeleccionado] = useState<string | null>(null);
+  const [hilo, setHilo] = useState<any[]>([]);
+  const [authorsMap, setAuthorsMap] = useState<Record<string, string>>({});
+  const [miPerfil, setMiPerfil] = useState<{ full_name: string } | null>(null);
+
+  const [loadingCasos, setLoadingCasos] = useState(true);
+  const [loadingHilo, setLoadingHilo] = useState(false);
+  const [nuevoTexto, setNuevoTexto] = useState("");
+  const [enviando, setEnviando] = useState(false);
+
+  // Cargar casos activos + perfil propio
+  useEffect(() => {
+    if (!user) return;
+    (async () => {
+      setLoadingCasos(true);
+      const [{ data: casosData }, { data: perfData }] = await Promise.all([
+        supabase.from("cases").select("id, radicado, cliente_nombre, abogado_id").neq("etapa", "Cerrado").order("created_at", { ascending: false }),
+        supabase.from("profiles").select("full_name").eq("id", user.id).maybeSingle(),
+      ]);
+      setCasos((casosData ?? []) as any);
+      setMiPerfil(perfData ?? null);
+      if ((casosData ?? []).length === 1) setCasoSeleccionado((casosData as any)[0].id);
+      setLoadingCasos(false);
+    })();
+  }, [user?.id]);
+
+  // Cargar hilo del caso seleccionado
+  const cargarHilo = async (caseId: string) => {
+    setLoadingHilo(true);
+    setHilo([]);
+    const { data: comData } = await supabase
+      .from("case_comments")
+      .select("id, texto, case_id, author_id, created_at")
+      .eq("case_id", caseId)
+      .order("created_at", { ascending: true });
+
+    const ids = Array.from(new Set((comData ?? []).map((c: any) => c.author_id).filter(Boolean)));
+    let aMap: Record<string, string> = { ...authorsMap };
+    const missing = ids.filter(id => !aMap[id]);
+    if (missing.length > 0) {
+      const { data: profs } = await supabase.from("profiles").select("id, full_name").in("id", missing);
+      (profs ?? []).forEach((p: any) => { aMap[p.id] = p.full_name; });
+      setAuthorsMap(aMap);
+    }
+
+    setHilo(
+      (comData ?? []).map((c: any) => ({
+        ...c,
+        autor_nombre: aMap[c.author_id] ?? "Usuario",
+        es_mio: c.author_id === user?.id,
+      }))
+    );
+    setLoadingHilo(false);
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    if (!casoSeleccionado) return;
+    cargarHilo(casoSeleccionado);
+
+    const ch = supabase
+      .channel(`jefe-hilo-${casoSeleccionado}`)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "case_comments", filter: `case_id=eq.${casoSeleccionado}` }, () => cargarHilo(casoSeleccionado))
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [casoSeleccionado]);
 
   const enviar = async () => {
-    if (!nuevo.trim() || !casoId || !user) return;
-    setSaving(true);
-    const caso = casos.find(c => c.id === casoId);
+    if (!nuevoTexto.trim() || !user || !casoSeleccionado) return;
+    setEnviando(true);
+    const caso = casos.find(c => c.id === casoSeleccionado);
     const { error } = await supabase.from("case_comments").insert({
-      case_id: casoId,
+      case_id: casoSeleccionado,
       author_id: user.id,
       abogado_id: caso?.abogado_id ?? null,
-      texto: nuevo.trim(),
+      texto: nuevoTexto.trim(),
     });
-    if (!error && caso?.abogado_id) {
-      await supabase.from("notificaciones").insert({
-        user_id: caso.abogado_id,
-        case_id: casoId,
-        tipo: "comentario",
-        titulo: "Nuevo comentario del director",
-        mensaje: `El director dejó un comentario en el caso #${caso.radicado}: "${nuevo.trim().slice(0, 80)}${nuevo.length > 80 ? "…" : ""}"`,
-      });
+    if (!error) {
+      // Notificar al abogado del caso
+      if (caso?.abogado_id) {
+        await supabase.from("notificaciones").insert({
+          user_id: caso.abogado_id,
+          case_id: casoSeleccionado,
+          tipo: "comentario",
+          titulo: "Nuevo comentario del director",
+          mensaje: `Comentario en caso #${caso.radicado}: "${nuevoTexto.trim().slice(0, 80)}${nuevoTexto.length > 80 ? "…" : ""}"`
+        });
+      }
+      setNuevoTexto("");
+    } else {
+      toast({ title: "Error al enviar", description: error.message, variant: "destructive" });
     }
-    if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); }
-    else { toast({ title: "Comentario enviado" }); setNuevo(""); }
-    setSaving(false);
-    load();
+    setEnviando(false);
   };
 
-  const filtrados = casoFiltro === "todos" ? comentarios : comentarios.filter(c => c.case_id === casoFiltro);
+  const casoActual = casos.find(c => c.id === casoSeleccionado);
 
   return (
     <>
       <SectionHeader title="Comentarios Internos" description="Notas e instrucciones entre el director y los abogados por caso" />
 
-      {/* Nuevo comentario */}
-      <div className="bg-card rounded-xl border border-border p-5 mb-6 space-y-3">
-        <p className="font-display text-sm font-semibold text-foreground">Nuevo comentario</p>
-        <Select value={casoId} onValueChange={setCasoId}>
-          <SelectTrigger><SelectValue placeholder="Selecciona un caso" /></SelectTrigger>
-          <SelectContent>
-            {casos.map(c => (
-              <SelectItem key={c.id} value={c.id}>#{c.radicado} — {c.cliente_nombre}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Textarea value={nuevo} onChange={e => setNuevo(e.target.value)} placeholder="Escribe una instrucción o nota al abogado…" rows={3} />
-        <Button type="button" onClick={enviar} disabled={saving || !nuevo.trim() || !casoId} className="gradient-gold text-primary border-0 font-body font-semibold shadow-gold hover:opacity-90">
-          {saving ? "Enviando…" : "Enviar comentario"}
-        </Button>
-      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
 
-      {/* Filtros */}
-      {casos.length > 0 && (
-        <div className="flex gap-2 flex-wrap mb-4">
-          <button type="button" onClick={() => setCasoFiltro("todos")}
-            className={`font-body text-xs px-3 py-1.5 rounded-full border transition-colors ${casoFiltro === "todos" ? "border-accent bg-accent/10 text-foreground" : "border-border text-muted-foreground hover:border-accent/40"}`}>
-            Todos ({comentarios.length})
-          </button>
-          {casos.filter(c => comentarios.some(cm => cm.case_id === c.id)).map(c => (
-            <button key={c.id} type="button" onClick={() => setCasoFiltro(c.id)}
-              className={`font-body text-xs px-3 py-1.5 rounded-full border transition-colors ${casoFiltro === c.id ? "border-accent bg-accent/10 text-foreground" : "border-border text-muted-foreground hover:border-accent/40"}`}>
-              #{c.radicado} ({comentarios.filter(cm => cm.case_id === c.id).length})
-            </button>
-          ))}
-        </div>
-      )}
-
-      {loading ? (
-        <p className="font-body text-sm text-muted-foreground">Cargando…</p>
-      ) : filtrados.length === 0 ? (
-        <div className="bg-card rounded-xl border border-border p-10 text-center">
-          <MessageSquare className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
-          <p className="font-body text-sm text-muted-foreground">No hay comentarios aún.</p>
-        </div>
-      ) : (
-        <div className="grid gap-3">
-          {filtrados.map(c => (
-            <div key={c.id} className="bg-card rounded-xl border border-border p-5">
-              <div className="flex items-start justify-between gap-3 mb-2">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-full gradient-navy flex items-center justify-center flex-shrink-0">
-                    <span className="font-display text-xs font-bold text-accent">{c.autor_nombre.charAt(0).toUpperCase()}</span>
-                  </div>
-                  <div>
-                    <p className="font-body text-sm font-semibold text-foreground">{c.autor_nombre}</p>
-                    <p className="font-body text-[10px] text-muted-foreground">
-                      {new Date(c.created_at).toLocaleString("es-CO", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })}
-                    </p>
-                  </div>
-                </div>
-                {c.caso && (
-                  <span className="font-body text-[10px] px-2.5 py-1 rounded-full bg-muted text-muted-foreground flex-shrink-0">
-                    #{c.caso.radicado} — {c.caso.cliente_nombre}
-                  </span>
-                )}
-              </div>
-              <p className="font-body text-sm text-foreground whitespace-pre-line pl-10">{c.texto}</p>
+        {/* Panel izquierdo: lista de casos */}
+        <div className="lg:col-span-1 bg-card rounded-xl border border-border overflow-hidden">
+          <div className="px-4 py-3 border-b border-border bg-muted/40">
+            <p className="font-body text-xs font-semibold text-muted-foreground uppercase tracking-wide">Casos activos</p>
+          </div>
+          {loadingCasos ? (
+            <div className="p-6 text-center">
+              <p className="font-body text-sm text-muted-foreground">Cargando casos…</p>
             </div>
-          ))}
+          ) : casos.length === 0 ? (
+            <div className="p-8 text-center">
+              <p className="font-body text-sm text-muted-foreground">No hay casos activos.</p>
+            </div>
+          ) : (
+            <ul className="divide-y divide-border max-h-[520px] overflow-y-auto">
+              {casos.map(c => {
+                const activo = c.id === casoSeleccionado;
+                return (
+                  <li key={c.id}>
+                    <button
+                      type="button"
+                      onClick={() => setCasoSeleccionado(c.id)}
+                      className={`w-full text-left px-4 py-3.5 transition-colors ${activo ? "bg-accent/10 border-l-2 border-l-accent" : "hover:bg-muted/60 border-l-2 border-l-transparent"}`}
+                    >
+                      <p className={`font-body text-sm font-semibold ${activo ? "text-foreground" : "text-foreground/80"}`}>#{c.radicado}</p>
+                      <p className="font-body text-xs text-muted-foreground truncate mt-0.5">{c.cliente_nombre}</p>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </div>
-      )}
+
+        {/* Panel derecho: hilo */}
+        <div className="lg:col-span-2 flex flex-col bg-card rounded-xl border border-border overflow-hidden" style={{ minHeight: "520px" }}>
+          {!casoSeleccionado ? (
+            <div className="flex-1 flex flex-col items-center justify-center p-12 text-center">
+              <MessageSquare className="w-12 h-12 text-muted-foreground mb-4" />
+              <p className="font-body text-base font-semibold text-foreground">Selecciona un caso</p>
+              <p className="font-body text-sm text-muted-foreground mt-1">Elige un caso de la lista para ver el hilo de comentarios y escribir.</p>
+            </div>
+          ) : (
+            <>
+              {/* Header */}
+              <div className="px-5 py-3.5 border-b border-border bg-muted/30 flex items-center gap-3">
+                <MessageSquare className="w-4 h-4 text-accent flex-shrink-0" />
+                <div>
+                  <p className="font-body text-sm font-semibold text-foreground">#{casoActual?.radicado}</p>
+                  <p className="font-body text-xs text-muted-foreground">{casoActual?.cliente_nombre}</p>
+                </div>
+              </div>
+
+              {/* Mensajes */}
+              <div className="flex-1 overflow-y-auto p-5 space-y-4" style={{ maxHeight: "360px" }}>
+                {loadingHilo ? (
+                  <p className="font-body text-sm text-muted-foreground text-center py-8">Cargando comentarios…</p>
+                ) : hilo.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-12 text-center">
+                    <MessageSquare className="w-8 h-8 text-muted-foreground mb-3" />
+                    <p className="font-body text-sm text-muted-foreground">No hay comentarios aún en este caso.<br/>Sé el primero en escribir.</p>
+                  </div>
+                ) : hilo.map(c => {
+                  const esMio = c.es_mio;
+                  const inicial = (c.autor_nombre ?? "?").charAt(0).toUpperCase();
+                  return (
+                    <div key={c.id} className={`flex gap-3 ${esMio ? "flex-row-reverse" : "flex-row"}`}>
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${esMio ? "bg-accent/20" : "gradient-navy"}`}>
+                        <span className="font-display text-xs font-bold text-accent">{inicial}</span>
+                      </div>
+                      <div className={`max-w-[75%] flex flex-col gap-1 ${esMio ? "items-end" : "items-start"}`}>
+                        <p className={`font-body text-[10px] text-muted-foreground ${esMio ? "text-right" : "text-left"}`}>
+                          {esMio ? (miPerfil?.full_name ?? "Tú") : c.autor_nombre} · {new Date(c.created_at).toLocaleString("es-CO", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false })}
+                        </p>
+                        <div className={`rounded-2xl px-4 py-2.5 ${esMio ? "bg-accent/15 rounded-tr-sm" : "bg-muted rounded-tl-sm"}`}>
+                          <p className="font-body text-sm text-foreground whitespace-pre-line leading-relaxed">{c.texto}</p>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Input de envío */}
+              <div className="border-t border-border p-4 bg-muted/20">
+                <div className="flex gap-3 items-end">
+                  <textarea
+                    value={nuevoTexto}
+                    onChange={e => setNuevoTexto(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); enviar(); } }}
+                    placeholder="Escribe una instrucción o nota al abogado… (Enter para enviar)"
+                    rows={2}
+                    className="flex-1 resize-none rounded-xl border border-border bg-background px-4 py-2.5 font-body text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-accent/40 transition"
+                  />
+                  <button
+                    type="button"
+                    onClick={enviar}
+                    disabled={enviando || !nuevoTexto.trim()}
+                    className="flex-shrink-0 h-10 w-10 rounded-xl bg-accent flex items-center justify-center text-accent-foreground hover:bg-accent/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    <Send className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
     </>
   );
 };
@@ -2369,12 +3319,14 @@ const SeccionNotificacionesJefe = ({ setActiveSection }: { setActiveSection: (s:
     return () => { supabase.removeChannel(ch); };
   }, [user?.id]);
 
-  const onClick = async (n: typeof notifs[number]) => {
+ const onClick = async (n: typeof notifs[number]) => {
     if (!n.leida) await supabase.from("notificaciones").update({ leida: true }).eq("id", n.id);
-    if (n.case_id || n.tipo.startsWith("caso") || n.tipo === "actuacion_creada" || n.tipo === "audiencia_creada") setActiveSection("revision");
-    else if (n.tipo === "documento_recibido") setActiveSection("documentos");
+    if (n.tipo === "solicitud_contacto") setActiveSection("solicitudes");
+    else if (n.tipo === "documento_recibido" || n.tipo === "documento_abogado") setActiveSection("documentos");
+    else if (n.case_id || n.tipo.startsWith("caso") || n.tipo === "actuacion_creada" || n.tipo === "audiencia_creada" || n.tipo === "comentario_abogado") setActiveSection("revision");
     load();
   };
+
 
   const marcarTodas = async () => {
     const ids = notifs.filter(n => !n.leida).map(n => n.id);
@@ -2408,19 +3360,39 @@ const SeccionNotificacionesJefe = ({ setActiveSection }: { setActiveSection: (s:
         </div>
       ) : (
         <div className="grid gap-3">
-          {notifs.map((n) => (
-            <button key={n.id} onClick={() => onClick(n)} className={`text-left bg-card rounded-xl border p-4 flex items-center gap-4 hover:border-accent/30 transition-all ${n.leida ? "border-border opacity-70" : "border-accent/30"}`}>
-              <div className={`w-2 h-2 rounded-full flex-shrink-0 ${n.leida ? "bg-muted-foreground/30" : "bg-accent"}`} />
-              <div className="flex-1 min-w-0">
-                <p className="font-body text-sm font-semibold text-foreground">{n.titulo}</p>
-                <p className="font-body text-xs text-muted-foreground mt-0.5">{n.mensaje}</p>
-                <p className="font-body text-[10px] text-muted-foreground/70 mt-1">{new Date(n.created_at).toLocaleString("es-CO", { dateStyle: "medium", timeStyle: "short" })}</p>
-              </div>
-              <button onClick={(e) => eliminar(e, n.id)} className="p-1.5 rounded-md bg-muted text-muted-foreground hover:text-destructive" title="Eliminar">
-                <X className="w-4 h-4" />
+          {notifs.map((n) => {
+  const iconMap: Record<string, { icon: any; color: string }> = {
+    comentario_abogado:       { icon: MessageSquare,  color: "bg-indigo-100 text-indigo-600" },
+    documento_abogado:        { icon: FileText,        color: "bg-emerald-100 text-emerald-600" },
+    documento_recibido:       { icon: FileText,        color: "bg-sky-100 text-sky-600" },
+    solicitud_contacto:       { icon: Phone,           color: "bg-amber-100 text-amber-600" },
+    termino_vencido:          { icon: Clock,           color: "bg-rose-100 text-rose-600" },
+    comentario:               { icon: MessageSquare,   color: "bg-violet-100 text-violet-600" },
+    recordatorio_audiencia:   { icon: CalendarDays,    color: "bg-blue-100 text-blue-600" },
+    recordatorio_vencimiento: { icon: Clock,           color: "bg-rose-100 text-rose-600" },
+    recordatorio_actuacion:   { icon: AlertTriangle,   color: "bg-amber-100 text-amber-600" },
+  };
+  const meta = iconMap[n.tipo] ?? { icon: Bell, color: "bg-muted text-muted-foreground" };
+  const Icon = meta.icon;
+  return (
+    <button key={n.id} onClick={() => onClick(n)} className={`text-left bg-card rounded-xl border p-4 flex items-center gap-4 hover:border-accent/30 transition-all ${n.leida ? "border-border opacity-60" : "border-accent/30 shadow-sm"}`}>
+      <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${meta.color}`}>
+        <Icon className="w-4 h-4" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <p className="font-body text-sm font-semibold text-foreground">{n.titulo}</p>
+          {!n.leida && <span className="w-2 h-2 rounded-full bg-accent flex-shrink-0" />}
+        </div>
+        <p className="font-body text-xs text-muted-foreground mt-0.5 line-clamp-2">{n.mensaje}</p>
+        <p className="font-body text-[10px] text-muted-foreground/60 mt-1">{new Date(n.created_at).toLocaleString("es-CO", { dateStyle: "medium", timeStyle: "short" })}</p>
+      </div>
+    <div onClick={(e) => eliminar(e as any, n.id)} className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-destructive transition-colors flex-shrink-0 cursor-pointer" title="Eliminar">
+                  <X className="w-4 h-4" />
+                </div>
               </button>
-            </button>
-          ))}
+            );
+          })}
         </div>
       )}
     </>
@@ -2428,27 +3400,6 @@ const SeccionNotificacionesJefe = ({ setActiveSection }: { setActiveSection: (s:
 };
 
 
-/* ── Configuración ── */
-const SeccionConfiguracion = () => (
-  <>
-    <SectionHeader title="Configuración" description="Ajustes generales del sistema, roles y permisos" />
-    <div className="grid gap-4">
-      {[
-        { label: "Notificaciones por correo", desc: "Enviar alertas de vencimientos y casos a abogados y clientes" },
-        { label: "Registro de actividades", desc: "Historial de quién accedió o modificó información" },
-        { label: "Políticas de confidencialidad", desc: "Gestión de acceso controlado por rol" },
-      ].map((cfg) => (
-        <div key={cfg.label} className="bg-card rounded-xl border border-border p-5 flex items-center justify-between">
-          <div>
-            <p className="font-display text-base font-semibold text-foreground">{cfg.label}</p>
-            <p className="font-body text-xs text-muted-foreground mt-1">{cfg.desc}</p>
-          </div>
-          <Button variant="outline" size="sm" className="font-body text-xs">Configurar</Button>
-        </div>
-      ))}
-    </div>
-  </>
-);
 
 
 /* ── Inicio / Resumen del Director ── */
@@ -2461,6 +3412,7 @@ const SeccionInicio = ({ onNavigate }: { onNavigate: (s: string) => void }) => {
   });
   const [loading, setLoading] = useState(true);
   const [directorName, setDirectorName] = useState("");
+  const [notifRecientes, setNotifRecientes] = useState<any[]>([]);
 
   const load = async () => {
     try {
@@ -2468,16 +3420,19 @@ const SeccionInicio = ({ onNavigate }: { onNavigate: (s: string) => void }) => {
     const hoy = new Date().toISOString().split("T")[0];
     const en7 = new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0];
 
-    const [
-      { data: cases }, { data: auds }, { data: abRoles }, { data: prof }
+    
+     const [
+      { data: cases }, { data: auds }, { data: abRoles }, { data: prof }, { data: notifs }
     ] = await Promise.all([
       supabase.from("cases").select("id, radicado, cliente_nombre, etapa, abogado_id, urgente, fecha_vencimiento, tipo").neq("etapa", "Cerrado"),
       supabase.from("audiencias").select("id, case_id, titulo, fecha_inicio, enlace_virtual").gte("fecha_inicio", hoy + "T00:00:00").lte("fecha_inicio", en7 + "T23:59:59"),
       supabase.from("user_roles").select("user_id").eq("role", "abogado"),
-      user ? supabase.from("profiles").select("full_name").eq("id", user.id).maybeSingle() : Promise.resolve({ data: null }),
+     user ? supabase.from("profiles").select("full_name").eq("id", user.id).maybeSingle() : Promise.resolve({ data: null }),
+      user ? supabase.from("notificaciones").select("id, tipo, titulo, mensaje, leida, created_at, case_id").eq("user_id", user.id).order("created_at", { ascending: false }).limit(5) : Promise.resolve({ data: [] }),
     ]);
 
     if ((prof as any)?.data?.full_name) setDirectorName((prof as any).data.full_name);
+    setNotifRecientes((notifs ?? []) as any[]);
 
     const casosArr = cases ?? [];
     const casosMap: Record<string, any> = {};
@@ -2641,46 +3596,201 @@ const SeccionInicio = ({ onNavigate }: { onNavigate: (s: string) => void }) => {
               </div>
             </div>
           )}
+          {/* Notificaciones recientes + acceso rápido al calendario */}
+          <div className="grid md:grid-cols-2 gap-5">
+            <div className="bg-card rounded-xl border border-border p-5">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="font-display text-base font-semibold text-foreground flex items-center gap-2">
+                  <Bell className="w-4 h-4 text-accent" /> Notificaciones recientes
+                </h2>
+                <button type="button" onClick={() => onNavigate("notificaciones")} className="font-body text-xs text-accent hover:underline">Ver todas</button>
+              </div>
+              {notifRecientes.length === 0 ? (
+                <p className="font-body text-xs text-muted-foreground py-4 text-center">Sin notificaciones nuevas</p>
+              ) : (
+                <div className="space-y-2">
+                  {notifRecientes.map((n: any) => {
+                    const tipoLabel: Record<string, string> = {
+                      comentario_abogado: "💬 Comentario",
+                      caso_devuelto: "↩️ Devuelto",
+                      caso_devuelto_log: "↩️ Devuelto",
+                      actuacion_creada: "⚖️ Actuación",
+                      audiencia_creada: "🏛 Audiencia",
+                      documento_recibido: "📄 Documento",
+                    };
+                    const label = tipoLabel[n.tipo] ?? "🔔 Alerta";
+                    return (
+                      <button key={n.id} type="button" onClick={() => onNavigate("notificaciones")}
+                        className={`w-full text-left p-3 rounded-lg border flex items-start gap-3 hover:border-accent/30 transition-colors ${n.leida ? "border-border bg-muted/10 opacity-60" : "border-accent/20 bg-accent/5"}`}>
+                        <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${n.leida ? "bg-muted-foreground/30" : "bg-accent"}`} />
+                        <div className="flex-1 min-w-0">
+                          <span className="font-body text-[10px] text-muted-foreground">{label}</span>
+                          <p className="font-body text-xs font-semibold text-foreground truncate">{n.titulo}</p>
+                          <p className="font-body text-[10px] text-muted-foreground line-clamp-1">{n.mensaje}</p>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="bg-card rounded-xl border border-border p-5">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="font-display text-base font-semibold text-foreground flex items-center gap-2">
+                  <CalendarDays className="w-4 h-4 text-accent" /> Próximos eventos
+                </h2>
+                <button type="button" onClick={() => onNavigate("calendario")} className="font-body text-xs text-accent hover:underline">Ver calendario</button>
+              </div>
+              {data.audiencias7.length === 0 && data.vencimientos7.length === 0 ? (
+                <p className="font-body text-xs text-muted-foreground py-4 text-center">Sin eventos en los próximos 7 días</p>
+              ) : (
+                <div className="space-y-2">
+                  {[
+                    ...data.audiencias7.slice(0, 3).map((a: any) => ({
+                      key: "aud-" + a.id, icon: "🏛", label: "Audiencia", titulo: a.titulo,
+                      fecha: new Date(a.fecha_inicio).toLocaleDateString("es-CO", { day: "numeric", month: "short" }),
+                      hora: new Date(a.fecha_inicio).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit", hour12: false }),
+                    })),
+                    ...data.vencimientos7.slice(0, 3).map((c: any) => ({
+                      key: "vc-" + c.id, icon: "⏰", label: "Vencimiento", titulo: `#${c.radicado} — ${c.cliente_nombre}`,
+                      fecha: new Date(c.fecha_vencimiento + "T12:00:00").toLocaleDateString("es-CO", { day: "numeric", month: "short" }),
+                      hora: "",
+                    })),
+                  ].slice(0, 5).map((ev) => (
+                    <button key={ev.key} type="button" onClick={() => onNavigate("calendario")}
+                      className="w-full text-left p-3 rounded-lg border border-border bg-muted/20 hover:border-accent/30 transition-colors flex items-center gap-3">
+                      <span className="text-base">{ev.icon}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-body text-xs font-semibold text-foreground truncate">{ev.titulo}</p>
+                        <p className="font-body text-[10px] text-muted-foreground">{ev.label} · {ev.fecha}{ev.hora ? ` · ${ev.hora}` : ""}</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         </>
       )}
     </div>
   );
 };
 
-
 const SeccionSolicitudes = () => {
   const { toast } = useToast();
   const [solicitudes, setSolicitudes] = useState<any[]>([]);
+  const [abogados, setAbogados] = useState<{ id: string; full_name: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [filtro, setFiltro] = useState<"todas" | "pendientes" | "atendidas">("pendientes");
+  const [seleccionada, setSeleccionada] = useState<any | null>(null);
+  const [abogadoAsignado, setAbogadoAsignado] = useState("");
+  const [comentario, setComentario] = useState("");
+  const [guardando, setGuardando] = useState(false);
 
   const load = async () => {
     setLoading(true);
-    const { data, error } = await (supabase as any)
-      .from("contact_requests")
-      .select("id, nombre, email, telefono, motivo, leido, created_at")
-      .order("created_at", { ascending: false });
-    if (error) toast({ title: "Error al cargar", description: error.message, variant: "destructive" });
+    const [{ data }, { data: roles }] = await Promise.all([
+      (supabase as any)
+        .from("contact_requests")
+        .select("id, nombre, email, telefono, motivo, mensaje, leido, atendido, comentario, abogado_asignado_id, created_at")
+        .order("created_at", { ascending: false }),
+      supabase.from("user_roles").select("user_id").eq("role", "abogado"),
+    ]);
     setSolicitudes(data ?? []);
+
+    const ids = (roles ?? []).map((r: any) => r.user_id);
+    if (ids.length > 0) {
+      const { data: perfiles } = await supabase.from("profiles").select("id, full_name").in("id", ids);
+      setAbogados((perfiles ?? []) as any);
+    }
     setLoading(false);
   };
 
   useEffect(() => { load(); }, []);
 
+  const abrirDetalle = (s: any) => {
+    setSeleccionada(s);
+    setAbogadoAsignado(s.abogado_asignado_id ?? "");
+    setComentario(s.comentario ?? "");
+  };
+
+  const cerrarDetalle = () => {
+    setSeleccionada(null);
+    setAbogadoAsignado("");
+    setComentario("");
+  };
+
+  const guardarAsignacion = async () => {
+    if (!seleccionada) return;
+    if (!abogadoAsignado || abogadoAsignado === "sin_asignar") {
+      toast({ title: "Selecciona un abogado", description: "Debes asignar un abogado para enviar el mensaje.", variant: "destructive" });
+      return;
+    }
+    setGuardando(true);
+
+    const { error } = await (supabase as any)
+      .from("contact_requests")
+      .update({
+        abogado_asignado_id: abogadoAsignado,
+        comentario: comentario.trim() || null,
+        leido: true,
+        atendido: true,
+      })
+      .eq("id", seleccionada.id);
+
+    if (error) {
+      setGuardando(false);
+      toast({ title: "Error al guardar", description: error.message, variant: "destructive" });
+      return;
+    }
+
+    if (comentario.trim()) {
+      await supabase.from("notificaciones").insert({
+        user_id: abogadoAsignado,
+        tipo: "solicitud_contacto",
+        titulo: `Nueva solicitud asignada: ${seleccionada.nombre}`,
+        mensaje: comentario.trim(),
+        metadata: {
+          solicitud_id: seleccionada.id,
+          cliente_nombre: seleccionada.nombre,
+          cliente_email: seleccionada.email,
+          cliente_telefono: seleccionada.telefono,
+          motivo: seleccionada.motivo,
+        },
+      });
+    }
+
+    setGuardando(false);
+    toast({ title: "Solicitud asignada", description: "Mensaje enviado al abogado." });
+    cerrarDetalle();
+    load();
+  };
+
   const marcarAtendida = async (id: string, atendido: boolean) => {
-    const { error } = await (supabase as any).from("contact_requests").update({ atendido }).eq("id", id);
+    const { error } = await (supabase as any).from("contact_requests").update({ atendido, leido: atendido }).eq("id", id);
     if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
-    toast({ title: atendido ? "Marcada como leída" : "Marcada como pendiente" });
+    toast({ title: atendido ? "Marcada como atendida" : "Marcada como pendiente" });
     load();
   };
 
   const filtradas = solicitudes.filter(s => {
-    if (filtro === "pendientes") return !s.leido;
-    if (filtro === "atendidas") return s.leido;
+    if (filtro === "pendientes") return !s.atendido;
+    if (filtro === "atendidas") return s.atendido;
     return true;
   });
 
-  const pendientes = solicitudes.filter(s => !s.leido).length;
+  const pendientes = solicitudes.filter(s => !s.atendido).length;
+  const nombreAbogado = (id: string) => abogados.find(a => a.id === id)?.full_name ?? "Sin asignar";
+
+  const MOTIVOS: Record<string, string> = {
+    consulta: "Consulta general",
+    seguimiento: "Seguimiento de caso",
+    informacion: "Solicitar información",
+    disciplinario: "Proceso disciplinario",
+    penal: "Proceso penal",
+    administrativo: "Derecho administrativo",
+  };
 
   return (
     <>
@@ -2689,11 +3799,10 @@ const SeccionSolicitudes = () => {
         description="Personas que solicitaron una llamada desde la página web"
       />
 
-      {/* Filtros */}
       <div className="flex gap-2 mb-5">
         {([
           { id: "pendientes", label: `Pendientes (${pendientes})` },
-          { id: "atendidas", label: `Atendidas (${solicitudes.filter(s => s.leido).length})` },
+          { id: "atendidas", label: `Atendidas (${solicitudes.filter(s => s.atendido).length})` },
           { id: "todas", label: `Todas (${solicitudes.length})` },
         ] as const).map(f => (
           <button key={f.id} type="button" onClick={() => setFiltro(f.id)}
@@ -2703,70 +3812,140 @@ const SeccionSolicitudes = () => {
         ))}
       </div>
 
-      {loading ? (
-        <p className="font-body text-sm text-muted-foreground">Cargando solicitudes…</p>
-      ) : filtradas.length === 0 ? (
-        <div className="bg-card rounded-xl border border-border p-10 text-center">
-          <Phone className="w-10 h-10 text-muted-foreground/40 mx-auto mb-3" />
-          <p className="font-body text-sm text-muted-foreground">
-            {filtro === "pendientes" ? "No hay solicitudes pendientes." : "No hay solicitudes en esta categoría."}
-          </p>
-        </div>
-      ) : (
-        <div className="grid gap-3">
-          {filtradas.map(s => (
-            <div key={s.id} className={`bg-card rounded-xl border p-5 transition-all ${!s.leido ? "border-accent/20" : "border-border opacity-70"}`}>
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex items-start gap-4 flex-1 min-w-0">
-                  {/* Avatar */}
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 font-display font-bold text-base ${!s.leido ? "bg-accent/15 text-accent" : "bg-muted text-muted-foreground"}`}>
-                    {s.nombre?.charAt(0)?.toUpperCase() ?? "?"}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="font-display text-sm font-semibold text-foreground">{s.nombre}</p>
-                      {!s.leido && <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-body font-medium">Pendiente</span>}
+      <div className={`flex gap-5 ${seleccionada ? "items-start" : ""}`}>
+        <div className={`flex-1 min-w-0 ${seleccionada ? "max-w-sm" : ""}`}>
+          {loading ? (
+            <p className="font-body text-sm text-muted-foreground">Cargando solicitudes…</p>
+          ) : filtradas.length === 0 ? (
+            <div className="bg-card rounded-xl border border-border p-10 text-center">
+              <Phone className="w-10 h-10 text-muted-foreground/40 mx-auto mb-3" />
+              <p className="font-body text-sm text-muted-foreground">
+                {filtro === "pendientes" ? "No hay solicitudes pendientes." : "No hay solicitudes en esta categoría."}
+              </p>
+            </div>
+          ) : (
+            <div className="grid gap-3">
+              {filtradas.map(s => (
+                <div
+                  key={s.id}
+                  onClick={() => abrirDetalle(s)}
+                  className={`bg-card rounded-xl border p-4 cursor-pointer transition-all hover:border-accent/40 ${seleccionada?.id === s.id ? "border-accent ring-1 ring-accent/20" : !s.atendido ? "border-accent/20" : "border-border opacity-70"}`}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 font-display font-bold text-sm ${!s.atendido ? "bg-accent/15 text-accent" : "bg-muted text-muted-foreground"}`}>
+                      {s.nombre?.charAt(0)?.toUpperCase() ?? "?"}
                     </div>
-                    {/* Contacto */}
-                    <div className="flex items-center gap-4 mt-1 flex-wrap">
-                      {s.email && (
-                        <a href={`mailto:${s.email}`} className="flex items-center gap-1 font-body text-xs text-accent hover:underline">
-                          <Mail className="w-3 h-3" />
-                          {s.email}
-                        </a>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="font-display text-sm font-semibold text-foreground truncate">{s.nombre}</p>
+                        {!s.atendido && <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-body font-medium shrink-0">Pendiente</span>}
+                        {s.atendido && <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-body font-medium shrink-0">Atendida</span>}
+                      </div>
+                      <p className="font-body text-xs text-muted-foreground truncate">{MOTIVOS[s.motivo] ?? s.motivo}</p>
+                      {s.abogado_asignado_id && (
+                        <p className="font-body text-[10px] text-accent mt-0.5">→ {nombreAbogado(s.abogado_asignado_id)}</p>
                       )}
-                      {s.telefono && (
-                        <a href={`tel:${s.telefono}`} className="flex items-center gap-1 font-body text-xs text-accent hover:underline">
-                          <Phone className="w-3 h-3" />
-                          {s.telefono}
-                        </a>
-                      )}
-                    </div>
-                    {/* Motivo / mensaje */}
-                    {s.motivo && (
-                      <p className="font-body text-xs text-muted-foreground mt-2 bg-muted/40 rounded-lg px-3 py-2">
-                        {s.motivo}
+                      <p className="font-body text-[10px] text-muted-foreground/60 mt-1">
+                        {new Date(s.created_at).toLocaleString("es-CO", { dateStyle: "medium", timeStyle: "short" })}
                       </p>
-                    )}
-                    <p className="font-body text-[10px] text-muted-foreground/60 mt-2">
-                      {new Date(s.created_at).toLocaleString("es-CO", { dateStyle: "long", timeStyle: "short" })}
-                    </p>
+                    </div>
                   </div>
                 </div>
-                {/* Acción */}
-                <Button type="button" size="sm" variant="outline"
-                  onClick={() => marcarAtendida(s.id, !s.atendido)}
-                  className={`flex-shrink-0 font-body text-xs gap-1.5 ${s.atendido ? "" : "border-accent/30 text-accent hover:bg-accent/10"}`}>
-                  <CheckSquare className="w-3.5 h-3.5" />
-                  {s.leido ? "Reabrir" : "Marcar atendida"}
-                </Button>
-              </div>
+              ))}
             </div>
-          ))}
+          )}
         </div>
-      )}
+
+        {seleccionada && (
+          <div className="w-96 flex-shrink-0 bg-card border border-border rounded-xl p-6 sticky top-4">
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="font-display text-base font-bold text-foreground">Detalle de solicitud</h3>
+              <button type="button" onClick={cerrarDetalle} className="text-muted-foreground hover:text-foreground transition-colors">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="bg-muted/30 rounded-lg p-4 mb-5 space-y-2">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-full bg-accent/15 text-accent flex items-center justify-center font-display font-bold text-sm">
+                  {seleccionada.nombre?.charAt(0)?.toUpperCase()}
+                </div>
+                <p className="font-display text-sm font-semibold text-foreground">{seleccionada.nombre}</p>
+              </div>
+              <a href={`mailto:${seleccionada.email}`} className="flex items-center gap-2 font-body text-xs text-accent hover:underline">
+                <Mail className="w-3.5 h-3.5" /> {seleccionada.email}
+              </a>
+              <a href={`tel:${seleccionada.telefono}`} className="flex items-center gap-2 font-body text-xs text-accent hover:underline">
+                <Phone className="w-3.5 h-3.5" /> {seleccionada.telefono}
+              </a>
+              <div className="pt-1 border-t border-border">
+                <p className="font-body text-[10px] text-muted-foreground uppercase tracking-wide mb-0.5">Motivo</p>
+                <p className="font-body text-xs text-foreground">{MOTIVOS[seleccionada.motivo] ?? seleccionada.motivo}</p>
+              </div>
+              {seleccionada.mensaje && (
+                <div className="pt-1 border-t border-border">
+                  <p className="font-body text-[10px] text-muted-foreground uppercase tracking-wide mb-0.5">Mensaje</p>
+                  <p className="font-body text-xs text-foreground">{seleccionada.mensaje}</p>
+                </div>
+              )}
+              <p className="font-body text-[10px] text-muted-foreground/60 pt-1">
+                {new Date(seleccionada.created_at).toLocaleString("es-CO", { dateStyle: "long", timeStyle: "short" })}
+              </p>
+            </div>
+
+            <div className="mb-4">
+              <Label className="font-body text-sm text-foreground mb-1.5 block">Asignar abogado</Label>
+              <Select value={abogadoAsignado} onValueChange={setAbogadoAsignado}>
+                <SelectTrigger className="font-body text-sm">
+                  <SelectValue placeholder="Seleccionar abogado…" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="sin_asignar">Sin asignar</SelectItem>
+                  {abogados.map(a => (
+                    <SelectItem key={a.id} value={a.id}>{a.full_name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="mb-5">
+              <Label className="font-body text-sm text-foreground mb-1.5 block">Mensaje para el abogado</Label>
+              <Textarea
+                value={comentario}
+                onChange={e => setComentario(e.target.value)}
+                placeholder="Escribe las instrucciones o contexto para el abogado asignado…"
+                rows={3}
+                className="font-body text-sm resize-none"
+              />
+            </div>
+
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                onClick={guardarAsignacion}
+                disabled={guardando}
+                className="flex-1 font-body text-sm gap-1.5"
+              >
+                <CheckSquare className="w-3.5 h-3.5" />
+                {guardando ? "Guardando…" : "Guardar y marcar atendida"}
+              </Button>
+            </div>
+
+            {seleccionada.atendido && (
+              <button
+                type="button"
+                onClick={() => { marcarAtendida(seleccionada.id, false); cerrarDetalle(); }}
+                className="w-full mt-2 font-body text-xs text-muted-foreground hover:text-foreground transition-colors text-center"
+              >
+                Reabrir como pendiente
+              </button>
+            )}
+          </div>
+        )}
+      </div>
     </>
   );
 };
+
 
 export default DashboardJefe;

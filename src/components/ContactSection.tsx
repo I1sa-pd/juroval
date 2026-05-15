@@ -19,6 +19,8 @@ const ContactSection = () => {
     motivo: "",
     telefono: "",
     mensaje: "",
+    cedula: "",
+    direccion: "",
   });
   const [loading, setLoading] = useState(false);
   const [enviado, setEnviado] = useState(false);
@@ -33,11 +35,12 @@ const ContactSection = () => {
       telefono: form.telefono.trim(),
       motivo: form.motivo,
       mensaje: form.mensaje.trim() || null,
+      cedula: form.cedula.trim() || null,
+      direccion: form.direccion.trim() || null,
     });
 
-    setLoading(false);
-
     if (error) {
+      setLoading(false);
       toast({
         title: "Error al enviar",
         description: "No se pudo guardar tu solicitud. Intenta de nuevo.",
@@ -46,8 +49,24 @@ const ContactSection = () => {
       return;
     }
 
+    const jefeResult = await supabase
+      .from("user_roles")
+      .select("user_id")
+      .eq("role", "jefe");
+    const jefeId = jefeResult.data?.[0]?.user_id;
+    if (jefeId) {
+      await supabase.from("notificaciones").insert({
+        user_id: jefeId,
+        case_id: null,
+        tipo: "solicitud_contacto",
+        titulo: "Nueva solicitud de contacto",
+        mensaje: `${form.nombre.trim()} (${form.telefono.trim()}) solicitó contacto por "${form.motivo}"${form.mensaje.trim() ? `: ${form.mensaje.trim().slice(0, 100)}` : ""}.`,
+      });
+    }
+
+    setLoading(false);
     setEnviado(true);
-    setForm({ nombre: "", email: "", motivo: "", telefono: "", mensaje: "" });
+    setForm({ nombre: "", email: "", motivo: "", telefono: "", mensaje: "", cedula: "", direccion: "" });
     setTimeout(() => setEnviado(false), 6000);
   };
 
@@ -123,6 +142,20 @@ const ContactSection = () => {
               rows={3}
               {...field("mensaje")}
               className={inputClass + " resize-none"}
+            />
+            <input
+              type="text"
+              placeholder="Cédula de ciudadanía"
+              required
+              {...field("cedula")}
+              className={inputClass}
+            />
+            <input
+              type="text"
+              placeholder="Dirección física (ciudad, barrio, calle)"
+              required
+              {...field("direccion")}
+              className={inputClass}
             />
             <button
               type="submit"

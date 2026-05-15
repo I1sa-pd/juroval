@@ -60,12 +60,12 @@ const Auth = () => {
 
   // Redirige si ya está logueado
   useEffect(() => {
-    if (!authLoading && user && role) {
-      if (role === "jefe") navigate("/dashboard-jefe", { replace: true });
-      else if (role === "abogado") navigate("/dashboard", { replace: true });
-      else navigate("/mi-caso", { replace: true });
+    if (user && role) {
+      if (role === "jefe") navigate({ to: "/dashboard-jefe", replace: true });
+      else if (role === "abogado") navigate({ to: "/dashboard", replace: true });
+      else navigate({ to: "/mi-caso", replace: true });
     }
-  }, [user, role, authLoading, navigate]);
+  }, [user, role, navigate]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -116,6 +116,13 @@ const Auth = () => {
 
     setLoading(false);
     toast({ title: "Bienvenido", description: "Acceso concedido" });
+
+    // Redirigir con window.location para garantizar la navegación
+    setTimeout(() => {
+      if (selectedRole === "jefe") window.location.href = "/dashboard-jefe";
+      else if (selectedRole === "abogado") window.location.href = "/dashboard";
+      else window.location.href = "/mi-caso";
+    }, 500);
   };
 
   return (
@@ -126,7 +133,7 @@ const Auth = () => {
 
       <div className="w-full max-w-md mx-auto px-6 relative z-10">
         <button
-          onClick={() => navigate("/")}
+          onClick={() => navigate({ to: "/" })}
           className="flex items-center gap-2 font-body text-sm text-accent mb-6 hover:underline"
         >
           <ArrowLeft className="w-4 h-4" />
@@ -199,7 +206,7 @@ const Auth = () => {
             <p className="font-body text-xs text-center mt-2">
               <button
                 type="button"
-                onClick={() => navigate("/forgot-password")}
+                onClick={() => navigate({ to: "/forgot-password" })}
                 className="text-accent hover:underline"
               >
                 ¿Olvidaste tu contraseña?
