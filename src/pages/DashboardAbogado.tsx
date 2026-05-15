@@ -1235,124 +1235,236 @@ const SeccionClientes = ({ casos }: { casos: Caso[] }) => {
 
 const SeccionComentariosAbogado = () => {
   const { user } = useAuth();
-  const [comentarios, setComentarios] = useState<any[]>([]);
+  const { toast } = useToast();
+
+  // Casos asignados al abogado
   const [casos, setCasos] = useState<{ id: string; radicado: string; cliente_nombre: string }[]>([]);
-  const [casoFiltro, setCasoFiltro] = useState("todos");
-  const [loading, setLoading] = useState(true);
+  // Caso seleccionado para ver/escribir comentarios
+  const [casoSeleccionado, setCasoSeleccionado] = useState<string | null>(null);
+  // Hilo de comentarios del caso seleccionado
+  const [hilo, setHilo] = useState<any[]>([]);
+  // Perfil propio y mapa de autores
+  const [miPerfil, setMiPerfil] = useState<{ full_name: string } | null>(null);
+  const [authorsMap, setAuthorsMap] = useState<Record<string, string>>({});
 
-  const load = async () => {
+  const [loadingCasos, setLoadingCasos] = useState(true);
+  const [loadingHilo, setLoadingHilo] = useState(false);
+  const [nuevoTexto, setNuevoTexto] = useState("");
+  const [enviando, setEnviando] = useState(false);
+
+  // Cargar casos asignados + perfil propio
+  useEffect(() => {
     if (!user) return;
-    setLoading(true);
+    (async () => {
+      setLoadingCasos(true);
+      const [{ data: casosData }, { data: perfData }] = await Promise.all([
+        supabase.from("cases").select("id, radicado, cliente_nombre").eq("abogado_id", user.id).order("created_at", { ascending: false }),
+        supabase.from("profiles").select("full_name").eq("id", user.id).maybeSingle(),
+      ]);
+      setCasos((casosData ?? []) as any);
+      setMiPerfil(perfData ?? null);
+      // Auto-seleccionar primer caso si solo hay uno
+      if ((casosData ?? []).length === 1) setCasoSeleccionado((casosData as any)[0].id);
+      setLoadingCasos(false);
+    })();
+  }, [user?.id]);
 
-    // Traer solo comentarios del abogado actual
+  // Cargar hilo de comentarios cuando cambia el caso seleccionado
+  const cargarHilo = async (caseId: string) => {
+    setLoadingHilo(true);
+    setHilo([]);
     const { data: comData } = await supabase
       .from("case_comments")
       .select("id, texto, case_id, author_id, created_at")
-      .eq("abogado_id", user.id)
-      .order("created_at", { ascending: false });
+      .eq("case_id", caseId)
+      .order("created_at", { ascending: true });
 
-    const { data: casosData } = await supabase
-      .from("cases")
-      .select("id, radicado, cliente_nombre")
-      .eq("abogado_id", user.id);
-
-    // Traer perfil del autor (director)
-    const authorIds = Array.from(new Set((comData ?? []).map((c: any) => c.author_id).filter(Boolean)));
-    let authorsMap: Record<string, string> = {};
-    if (authorIds.length > 0) {
-      const { data: profs } = await supabase.from("profiles").select("id, full_name").in("id", authorIds);
-      (profs ?? []).forEach((p: any) => { authorsMap[p.id] = p.full_name; });
+    const ids = Array.from(new Set((comData ?? []).map((c: any) => c.author_id).filter(Boolean)));
+    let aMap: Record<string, string> = { ...authorsMap };
+    const missing = ids.filter(id => !aMap[id]);
+    if (missing.length > 0) {
+      const { data: profs } = await supabase.from("profiles").select("id, full_name").in("id", missing);
+      (profs ?? []).forEach((p: any) => { aMap[p.id] = p.full_name; });
+      setAuthorsMap(aMap);
     }
 
-    const enriched = (comData ?? []).map((c: any) => ({
-      ...c,
-      autor_nombre: authorsMap[c.author_id] ?? "Director",
-      caso: (casosData ?? []).find((ca: any) => ca.id === c.case_id),
-    }));
-
-    setComentarios(enriched);
-    setCasos((casosData ?? []) as any);
-    setLoading(false);
+    setHilo(
+      (comData ?? []).map((c: any) => ({
+        ...c,
+        autor_nombre: aMap[c.author_id] ?? "Usuario",
+        es_mio: c.author_id === user?.id,
+      }))
+    );
+    setLoadingHilo(false);
   };
 
-  useEffect(() => { load(); }, [user?.id]);
+  useEffect(() => {
+    if (!casoSeleccionado) return;
+    cargarHilo(casoSeleccionado);
 
-  const filtrados = casoFiltro === "todos"
-    ? comentarios
-    : comentarios.filter(c => c.case_id === casoFiltro);
+    // Realtime: nuevos comentarios en este caso
+    const ch = supabase
+      .channel(`hilo-${casoSeleccionado}`)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "case_comments", filter: `case_id=eq.${casoSeleccionado}` }, () => cargarHilo(casoSeleccionado))
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [casoSeleccionado]);
+
+  const enviar = async () => {
+    if (!nuevoTexto.trim() || !user || !casoSeleccionado) return;
+    setEnviando(true);
+    const { error } = await supabase.from("case_comments").insert({
+      case_id: casoSeleccionado,
+      author_id: user.id,
+      abogado_id: user.id,
+      texto: nuevoTexto.trim(),
+    });
+    if (!error) {
+      // Notificar al director
+      const { data: jefeRoles } = await supabase.from("user_roles").select("user_id").eq("role", "jefe");
+      const jefeId = jefeRoles?.[0]?.user_id;
+      const caso = casos.find(c => c.id === casoSeleccionado);
+      if (jefeId) {
+        await supabase.from("notificaciones").insert({
+          user_id: jefeId,
+          case_id: casoSeleccionado,
+          tipo: "comentario_abogado",
+          titulo: "Nuevo comentario de abogado",
+          mensaje: `Comentario en caso #${caso?.radicado ?? ""}: "${nuevoTexto.trim().slice(0, 80)}${nuevoTexto.length > 80 ? "…" : ""}"`
+        });
+      }
+      setNuevoTexto("");
+    } else {
+      toast({ title: "Error al enviar", description: error.message, variant: "destructive" });
+    }
+    setEnviando(false);
+  };
+
+  const casoActual = casos.find(c => c.id === casoSeleccionado);
 
   return (
     <div className="space-y-6">
-      <div className="mb-8">
-        <h1 className="font-display text-3xl font-bold text-foreground">Comentarios del Director</h1>
-        <p className="font-body text-muted-foreground mt-1">Instrucciones y notas del director sobre tus casos</p>
+      {/* Encabezado */}
+      <div className="mb-6">
+        <h1 className="font-display text-3xl font-bold text-foreground">Comentarios Internos</h1>
+        <p className="font-body text-muted-foreground mt-1">Selecciona un caso para ver y escribir comentarios con el director</p>
       </div>
 
-      {/* Filtro por caso */}
-      {casos.length > 1 && (
-        <div className="flex gap-2 flex-wrap mb-4">
-          <button
-            type="button"
-            onClick={() => setCasoFiltro("todos")}
-            className={`font-body text-xs px-3 py-1.5 rounded-full border transition-colors ${casoFiltro === "todos" ? "border-accent bg-accent/10 text-foreground" : "border-border text-muted-foreground hover:border-accent/40"}`}
-          >
-            Todos ({comentarios.length})
-          </button>
-          {casos.map(c => (
-            <button
-              key={c.id}
-              type="button"
-              onClick={() => setCasoFiltro(c.id)}
-              className={`font-body text-xs px-3 py-1.5 rounded-full border transition-colors ${casoFiltro === c.id ? "border-accent bg-accent/10 text-foreground" : "border-border text-muted-foreground hover:border-accent/40"}`}
-            >
-              #{c.radicado} ({comentarios.filter(cm => cm.case_id === c.id).length})
-            </button>
-          ))}
-        </div>
-      )}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
 
-      {loading ? (
-        <p className="font-body text-sm text-muted-foreground">Cargando comentarios…</p>
-      ) : filtrados.length === 0 ? (
-        <div className="bg-card rounded-xl border border-border p-12 text-center">
-          <MessageSquare className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
-          <p className="font-body text-sm text-muted-foreground">
-            {comentarios.length === 0
-              ? "El director no ha dejado comentarios sobre tus casos aún."
-              : "No hay comentarios para este caso."}
-          </p>
-        </div>
-      ) : (
-        <div className="grid gap-3">
-          {filtrados.map(c => (
-            <div key={c.id} className="bg-card rounded-xl border border-accent/20 p-5">
-              <div className="flex items-start justify-between gap-3 mb-3">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-full gradient-navy flex items-center justify-center flex-shrink-0">
-                    <span className="font-display text-xs font-bold text-accent">
-                      {c.autor_nombre.charAt(0).toUpperCase()}
-                    </span>
-                  </div>
-                  <div>
-                    <p className="font-body text-sm font-semibold text-foreground">{c.autor_nombre}</p>
-                    <p className="font-body text-[10px] text-muted-foreground">
-                      {new Date(c.created_at).toLocaleString("es-CO", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })}
-                    </p>
-                  </div>
-                </div>
-                {c.caso && (
-                  <span className="font-body text-[10px] px-2.5 py-1 rounded-full bg-muted text-muted-foreground flex-shrink-0">
-                    #{c.caso.radicado} — {c.caso.cliente_nombre}
-                  </span>
-                )}
-              </div>
-              <p className="font-body text-sm text-foreground whitespace-pre-line leading-relaxed pl-10">
-                {c.texto}
-              </p>
+        {/* Panel izquierdo: lista de casos */}
+        <div className="lg:col-span-1 bg-card rounded-xl border border-border overflow-hidden">
+          <div className="px-4 py-3 border-b border-border bg-muted/40">
+            <p className="font-body text-xs font-semibold text-muted-foreground uppercase tracking-wide">Mis casos</p>
+          </div>
+          {loadingCasos ? (
+            <div className="p-6 text-center">
+              <p className="font-body text-sm text-muted-foreground">Cargando casos…</p>
             </div>
-          ))}
+          ) : casos.length === 0 ? (
+            <div className="p-8 text-center">
+              <Briefcase className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
+              <p className="font-body text-sm text-muted-foreground">No tienes casos asignados.</p>
+            </div>
+          ) : (
+            <ul className="divide-y divide-border">
+              {casos.map(c => {
+                const activo = c.id === casoSeleccionado;
+                return (
+                  <li key={c.id}>
+                    <button
+                      type="button"
+                      onClick={() => setCasoSeleccionado(c.id)}
+                      className={`w-full text-left px-4 py-3.5 transition-colors ${activo ? "bg-accent/10 border-l-2 border-l-accent" : "hover:bg-muted/60 border-l-2 border-l-transparent"}`}
+                    >
+                      <p className={`font-body text-sm font-semibold ${activo ? "text-foreground" : "text-foreground/80"}`}>
+                        #{c.radicado}
+                      </p>
+                      <p className="font-body text-xs text-muted-foreground truncate mt-0.5">{c.cliente_nombre}</p>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </div>
-      )}
+
+        {/* Panel derecho: hilo de comentarios */}
+        <div className="lg:col-span-2 flex flex-col bg-card rounded-xl border border-border overflow-hidden" style={{ minHeight: "520px" }}>
+          {!casoSeleccionado ? (
+            <div className="flex-1 flex flex-col items-center justify-center p-12 text-center">
+              <MessageSquare className="w-12 h-12 text-muted-foreground mb-4" />
+              <p className="font-body text-base font-semibold text-foreground">Selecciona un caso</p>
+              <p className="font-body text-sm text-muted-foreground mt-1">Elige un caso de la lista para ver sus comentarios y escribir uno nuevo.</p>
+            </div>
+          ) : (
+            <>
+              {/* Header del hilo */}
+              <div className="px-5 py-3.5 border-b border-border bg-muted/30 flex items-center gap-3">
+                <MessageSquare className="w-4 h-4 text-accent flex-shrink-0" />
+                <div>
+                  <p className="font-body text-sm font-semibold text-foreground">#{casoActual?.radicado}</p>
+                  <p className="font-body text-xs text-muted-foreground">{casoActual?.cliente_nombre}</p>
+                </div>
+              </div>
+
+              {/* Mensajes */}
+              <div className="flex-1 overflow-y-auto p-5 space-y-4" style={{ maxHeight: "360px" }}>
+                {loadingHilo ? (
+                  <p className="font-body text-sm text-muted-foreground text-center py-8">Cargando comentarios…</p>
+                ) : hilo.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-12 text-center">
+                    <MessageSquare className="w-8 h-8 text-muted-foreground mb-3" />
+                    <p className="font-body text-sm text-muted-foreground">No hay comentarios aún en este caso.<br/>Sé el primero en escribir.</p>
+                  </div>
+                ) : hilo.map(c => {
+                  const esMio = c.es_mio;
+                  const inicial = (c.autor_nombre ?? "?").charAt(0).toUpperCase();
+                  return (
+                    <div key={c.id} className={`flex gap-3 ${esMio ? "flex-row-reverse" : "flex-row"}`}>
+                      {/* Avatar */}
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${esMio ? "bg-accent/20" : "gradient-navy"}`}>
+                        <span className={`font-display text-xs font-bold ${esMio ? "text-accent" : "text-accent"}`}>{inicial}</span>
+                      </div>
+                      {/* Burbuja */}
+                      <div className={`max-w-[75%] ${esMio ? "items-end" : "items-start"} flex flex-col gap-1`}>
+                        <p className={`font-body text-[10px] text-muted-foreground ${esMio ? "text-right" : "text-left"}`}>
+                          {esMio ? (miPerfil?.full_name ?? "Tú") : c.autor_nombre} · {new Date(c.created_at).toLocaleString("es-CO", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false })}
+                        </p>
+                        <div className={`rounded-2xl px-4 py-2.5 ${esMio ? "bg-accent/15 rounded-tr-sm" : "bg-muted rounded-tl-sm"}`}>
+                          <p className="font-body text-sm text-foreground whitespace-pre-line leading-relaxed">{c.texto}</p>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Input de envío */}
+              <div className="border-t border-border p-4 bg-muted/20">
+                <div className="flex gap-3 items-end">
+                  <textarea
+                    value={nuevoTexto}
+                    onChange={e => setNuevoTexto(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); enviar(); } }}
+                    placeholder="Escribe un comentario… (Enter para enviar, Shift+Enter para nueva línea)"
+                    rows={2}
+                    className="flex-1 resize-none rounded-xl border border-border bg-background px-4 py-2.5 font-body text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-accent/40 transition"
+                  />
+                  <button
+                    type="button"
+                    onClick={enviar}
+                    disabled={enviando || !nuevoTexto.trim()}
+                    className="flex-shrink-0 h-10 w-10 rounded-xl bg-accent flex items-center justify-center text-accent-foreground hover:bg-accent/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    <Send className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 };

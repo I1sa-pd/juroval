@@ -72,12 +72,6 @@ const HeroSection = () => {
             >
               Acceder al Sistema
             </button>
-            <button
-              onClick={() => navigate({ to: "/consultar-caso" })}
-              className="border border-accent/30 text-primary-foreground font-body font-medium px-8 py-4 rounded-lg hover:bg-accent/5 transition-colors"
-            >
-              Consultar mi Caso
-            </button>
           </div>
 
           <div className="mt-20 grid grid-cols-2 md:grid-cols-4 gap-8 max-w-3xl mx-auto">
