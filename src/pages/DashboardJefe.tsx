@@ -1384,7 +1384,7 @@ const SeccionTerminosJefe = () => {
   const load = async () => {
     setLoading(true);
     const [{ data: tData }, { data: cases }, { data: acts }, { data: profs }] = await Promise.all([
-      supabase.from("terminos_procesales").select("id, area, etapa, dias_plazo, descripcion").order("area").order("etapa"),
+      supabase.from("terminos_procesales").select("id, area_id, etapa, dias_plazo, descripcion, areas_derecho(nombre)").order("area_id").order("etapa"),
       supabase.from("cases").select("id, radicado, cliente_nombre, etapa, abogado_id, tipo, urgente, created_at").neq("etapa", "Cerrado"),
       supabase.from("actuaciones").select("case_id, created_at").order("created_at", { ascending: false }),
       supabase.from("profiles").select("id, full_name"),
@@ -1394,9 +1394,10 @@ const SeccionTerminosJefe = () => {
     const map: typeof terminos = {};
     const areasSet = new Set<string>();
     (tData ?? []).forEach((t: any) => {
-      if (!map[t.area]) map[t.area] = {};
-      map[t.area][t.etapa] = { id: t.id, dias: t.dias_plazo, descripcion: t.descripcion ?? "" };
-      areasSet.add(t.area);
+    if (!map[t.area_id]) map[t.area_id] = {};
+map[t.area_id][t.etapa] = { id: t.id, dias: t.dias_plazo, descripcion: t.descripcion ?? "" };
+map[t.area_id].__nombre__ = (t.areas_derecho as any)?.nombre ?? t.area_id;
+areasSet.add(t.area_id);
     });
     const areasArr = Array.from(areasSet).sort();
     setTerminos(map);
@@ -1423,7 +1424,27 @@ const SeccionTerminosJefe = () => {
       .sort((a: any, b: any) => (b.diasSinMov - b.plazo) - (a.diasSinMov - a.plazo));
 
     setAlertas(rows);
+
+    // ── Notificar al jefe sobre casos vencidos automáticamente
+    const { data: jefeData } = await supabase.from("user_roles").select("user_id").eq("role", "jefe").limit(1);
+    const jefeId = jefeData?.[0]?.user_id;
+    if (jefeId) {
+      for (const caso of rows) {
+        const { data: existe } = await supabase.from("notificaciones")
+          .select("id").eq("user_id", jefeId).eq("tipo", "termino_vencido")
+          .eq("case_id", caso.id).gte("created_at", new Date(new Date().setHours(0,0,0,0)).toISOString()).limit(1);
+        if ((existe ?? []).length === 0) {
+          await supabase.from("notificaciones").insert({
+            user_id: jefeId, case_id: caso.id, tipo: "termino_vencido",
+            titulo: "Caso con plazo vencido",
+            mensaje: `El caso #${caso.radicado} (${caso.cliente_nombre}) lleva ${caso.diasSinMov} días en etapa "${caso.etapa}" — plazo: ${caso.plazo} días.`,
+          });
+        }
+      }
+    }
+
     setLoading(false);
+  };
   };
 
   useEffect(() => { load(); }, [limiteDias]);
@@ -1507,19 +1528,19 @@ const SeccionTerminosJefe = () => {
         <>
           {/* Selector de área */}
           <div className="flex gap-2 flex-wrap mb-6">
-            {areas.map(a => (
-              <button key={a} type="button" onClick={() => { setAreaActiva(a); setEditando({}); }}
-                className={`font-body text-xs px-4 py-2 rounded-full border transition-colors ${areaActiva === a ? "border-accent bg-accent/10 text-foreground font-medium" : "border-border text-muted-foreground hover:border-accent/40"}`}>
-                {a}
-              </button>
-            ))}
+           {areas.map(a => (
+  <button key={a} type="button" onClick={() => { setAreaActiva(a); setEditando({}); }}
+    className={`font-body text-xs px-4 py-2 rounded-full border transition-colors ${areaActiva === a ? "border-accent bg-accent/10 text-foreground font-medium" : "border-border text-muted-foreground hover:border-accent/40"}`}>
+    {(terminos[a] as any)?.__nombre__ ?? a}
+  </button>
+))}
           </div>
 
           {areaActiva && terminos[areaActiva] && (
             <div className="bg-card rounded-xl border border-border overflow-hidden">
               <div className="p-4 border-b border-border flex items-center justify-between">
                 <div>
-                  <p className="font-display text-base font-semibold text-foreground">{areaActiva}</p>
+                  <p className="font-display text-base font-semibold text-foreground">{(terminos[areaActiva] as any)?.__nombre__ ?? areaActiva}</p>
                   <p className="font-body text-xs text-muted-foreground">Plazos en días hábiles por etapa del proceso</p>
                 </div>
                 {hayEdiciones && (
@@ -1710,10 +1731,10 @@ const SeccionAbogados = () => {
       }
     }
 
-    const [{ data: roleRows }, { data: aData }] = await Promise.all([
+   const [{ data: tData }, { data: cases }, { data: acts }, { data: profs }] = await Promise.all([
       supabase.from("user_roles").select("user_id, role").in("role", ["abogado", "cliente"]),
       supabase.from("areas_derecho").select("id, nombre").order("nombre"),
-    ]);
+    
     setAreas(aData ?? []);
     const ids = (roleRows ?? []).map((r) => r.user_id);
     if (ids.length === 0) { setAbogados([]); setClientes([]); setLoading(false); return; }
@@ -2220,11 +2241,12 @@ const SeccionCalendarioJefe = () => {
         hora: "23:59",
         titulo: a.tipo,
         subtitulo: a.descripcion,
-        tipo: esEntrega ? "documento" : "termino",
+       tipo: esEntrega ? "documento" : "termino",
         radicado: caso.radicado,
         tipoCaso: caso.tipo,
         cliente: caso.cliente_nombre,
         abogado_id: caso.abogado_id,
+        abogado: pm[caso.abogado_id] ?? "Sin abogado",
       });
     });
 

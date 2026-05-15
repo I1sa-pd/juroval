@@ -78,10 +78,11 @@ type Notificacion = {
 };
 
 const menuItems = [
-  { id: "casos", icon: Briefcase, label: "Gestión de Casos" },
-  { id: "calendario", icon: CalendarDays, label: "Calendario" },
-  { id: "notificaciones", icon: Bell, label: "Notificaciones" },
-  { id: "clientes", icon: Users, label: "Clientes" },
+  { id: "casos",        icon: Briefcase,     label: "Gestión de Casos" },
+  { id: "terminos",     icon: Clock,         label: "Mis Términos" },
+  { id: "calendario",  icon: CalendarDays,  label: "Calendario" },
+  { id: "notificaciones", icon: Bell,        label: "Notificaciones" },
+  { id: "clientes",    icon: Users,         label: "Clientes" },
   { id: "comentarios", icon: MessageSquare, label: "Comentarios del Director" },
 ];
 
@@ -98,37 +99,74 @@ const DashboardAbogado = () => {
   const [notificaciones, setNotificaciones] = useState<Notificacion[]>([]);
   const [loading, setLoading] = useState(true);
   const [openCaseId, setOpenCaseId] = useState<string | null>(null);
+const [terminosMap, setTerminosMap] = useState<Record<string, Record<string, number>>>({});
 
-const reload = async () => {
-    if (!user) return;
-    setLoading(true);
-    const { data: cs } = await supabase.from("cases").select("*").eq("abogado_id", user.id).order("created_at", { ascending: false });
-    const ids = (cs ?? []).map((c) => c.id);
-    if (ids.length > 0) {
-      const [{ data: acts }, { data: auds }] = await Promise.all([
-        supabase.from("actuaciones").select("*").in("case_id", ids).order("vence_at", { ascending: true, nullsFirst: false }),
-        supabase.from("audiencias").select("*").in("case_id", ids).order("fecha_inicio", { ascending: true }),
-      ]);
-      setActuaciones((acts ?? []) as any);
-      setAudiencias((auds ?? []) as any);
-    } else {
-      setActuaciones([]); setAudiencias([]);
+  const reload = async () => {
+  if (!user) return;
+  setLoading(true);
+
+  const [{ data: cs }, { data: termData }] = await Promise.all([
+    supabase.from("cases").select("*").eq("abogado_id", user.id).order("created_at", { ascending: false }),
+   supabase.from("terminos_procesales").select("id, area_id, etapa, dias_plazo, descripcion")
+  ]);
+
+  const tmap: Record<string, Record<string, number>> = {};
+  (termData ?? []).forEach((t: any) => {
+    if (!tmap[t.area_id]) tmap[t.area_id] = {};
+    tmap[t.area_id][t.etapa] = t.dias_plazo;
+  });
+  setTerminosMap(tmap);
+
+  const ids = (cs ?? []).map((c) => c.id);
+  if (ids.length > 0) {
+    const [{ data: acts }, { data: auds }] = await Promise.all([
+      supabase.from("actuaciones").select("*").in("case_id", ids).order("vence_at", { ascending: true, nullsFirst: false }),
+      supabase.from("audiencias").select("*").in("case_id", ids).order("fecha_inicio", { ascending: true }),
+    ]);
+    setActuaciones((acts ?? []) as any);
+    setAudiencias((auds ?? []) as any);
+  } else {
+    setActuaciones([]); setAudiencias([]);
+  }
+  setCasos((cs ?? []) as any);
+
+  const { data: notifs } = await supabase
+    .from("notificaciones")
+    .select("*")
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: false })
+    .limit(100);
+  setNotificaciones((notifs ?? []) as any);
+
+  // ── Notificaciones automáticas por términos próximos a vencer
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+    for (const act of (acts ?? []) as any[]) {
+      if (!act.vence_at || act.cumplida) continue;
+      const vence = new Date(act.vence_at);
+      vence.setHours(0, 0, 0, 0);
+      const diff = Math.floor((vence.getTime() - hoy.getTime()) / 86400000);
+      if (diff !== 3 && diff !== 0) continue; // solo avisa 3 días antes y el día que vence
+      const tipo = diff <= 0 ? "termino_vencido" : "termino_proximo";
+      const titulo = diff <= 0 ? "Término procesal vencido" : "Término procesal por vencer";
+      const mensaje = diff <= 0
+        ? `La actuación "${act.tipo}" del caso #${(cs ?? []).find((c: any) => c.id === act.case_id)?.radicado ?? ""} venció hoy.`
+        : `La actuación "${act.tipo}" del caso #${(cs ?? []).find((c: any) => c.id === act.case_id)?.radicado ?? ""} vence en ${diff} días.`;
+      // Evitar duplicados: no insertar si ya existe una notificación del mismo tipo y actuación hoy
+      const { data: existe } = await supabase.from("notificaciones")
+        .select("id").eq("user_id", user.id).eq("tipo", tipo)
+        .eq("case_id", act.case_id).gte("created_at", hoy.toISOString()).limit(1);
+      if ((existe ?? []).length === 0) {
+        await supabase.from("notificaciones").insert({
+          user_id: user.id, case_id: act.case_id, tipo, titulo, mensaje,
+        });
+      }
     }
-    setCasos((cs ?? []) as any);
-
-    const { data: notifs } = await supabase
-      .from("notificaciones")
-      .select("*")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false })
-      .limit(100);
-    setNotificaciones((notifs ?? []) as any);
 
     setLoading(false);
   };
 
   useEffect(() => { reload(); /* eslint-disable-next-line */ }, [user?.id]);
-
   // ── Realtime: refresca cuando cambia algo en la BD relacionado con el abogado
   useEffect(() => {
     if (!user) return;
@@ -235,30 +273,39 @@ const reload = async () => {
       <main className="flex-1 md:ml-64 pt-14 md:pt-0">
         <div className="p-6 md:p-8">
           {activeSection === "casos" && (
-            openCaso
-              ? <CaseDetail
-                  caso={openCaso}
-                  actuaciones={actuaciones.filter(a => a.case_id === openCaso.id)}
-                  audiencias={audiencias.filter(a => a.case_id === openCaso.id)}
-                  onBack={() => setOpenCaseId(null)}
-                  onChanged={reload}
-                  userId={user?.id ?? ""}
-                />
-              :  <SeccionCasos
-                   casos={casos}
-                   actuaciones={actuaciones}
-                    audiencias={audiencias}
-                    documentos={[]}
-                     loading={loading}
-                        onChanged={reload}
-                          userId={user?.id ?? ""}
-                           onOpenCase={(id) => setOpenCaseId(id)}
-                               />
-             )}
-          {activeSection === "calendario" && <SeccionCalendario casos={casos} audiencias={audiencias} actuaciones={actuaciones} onOpenCase={(id) => { setActiveSection("casos"); setOpenCaseId(id); }} onChanged={reload} />}
-          {activeSection === "notificaciones" && <SeccionNotificaciones notificaciones={notificaciones} casos={casos} onOpenCase={(id) => { setActiveSection("casos"); setOpenCaseId(id); }} onChanged={reload} />}
-          {activeSection === "clientes" && <SeccionClientes casos={casos} />}
-          {activeSection === "comentarios" && <SeccionComentariosAbogado />}
+  openCaso
+    ? <CaseDetail
+        caso={openCaso}
+        actuaciones={actuaciones.filter(a => a.case_id === openCaso.id)}
+        audiencias={audiencias.filter(a => a.case_id === openCaso.id)}
+        onBack={() => setOpenCaseId(null)}
+        onChanged={reload}
+        userId={user?.id ?? ""}
+        terminosMap={terminosMap}
+      />
+    : <SeccionCasos
+        casos={casos}
+        actuaciones={actuaciones}
+        audiencias={audiencias}
+        documentos={[]}
+        loading={loading}
+        onChanged={reload}
+        userId={user?.id ?? ""}
+        onOpenCase={(id) => setOpenCaseId(id)}
+      />
+)}
+{activeSection === "terminos" && (
+  <SeccionTerminosAbogado
+    casos={casos}
+    actuaciones={actuaciones}
+    terminosMap={terminosMap}
+    onOpenCase={(id) => { setActiveSection("casos"); setOpenCaseId(id); }}
+  />
+)}
+{activeSection === "calendario" && <SeccionCalendario casos={casos} audiencias={audiencias} actuaciones={actuaciones} onOpenCase={(id) => { setActiveSection("casos"); setOpenCaseId(id); }} onChanged={reload} />}
+{activeSection === "notificaciones" && <SeccionNotificaciones notificaciones={notificaciones} casos={casos} onOpenCase={(id) => { setActiveSection("casos"); setOpenCaseId(id); }} onChanged={reload} />}
+{activeSection === "clientes" && <SeccionClientes casos={casos} />}
+{activeSection === "comentarios" && <SeccionComentariosAbogado />}
         </div>
       </main>
     </div>
@@ -287,6 +334,113 @@ const getEtapaColor = (etapa: string) => {
     "Cerrado": "bg-muted text-muted-foreground",
   };
   return colores[etapa] ?? "bg-accent/10 text-accent";
+};
+/* ── Mis Términos ── */
+const SeccionTerminosAbogado = ({
+  casos, actuaciones, terminosMap, onOpenCase,
+}: {
+  casos: Caso[];
+  actuaciones: Actuacion[];
+  terminosMap: Record<string, Record<string, number>>;
+  onOpenCase: (id: string) => void;
+}) => {
+  const hoy = new Date();
+
+  const ultimaActMap: Record<string, string> = {};
+  actuaciones.forEach(a => {
+    if (!ultimaActMap[a.case_id]) ultimaActMap[a.case_id] = a.fecha;
+  });
+
+  const rows = casos
+    .filter(c => c.etapa !== "Cerrado")
+    .map(c => {
+      const plazo = c.area_id ? (terminosMap[c.area_id]?.[c.etapa] ?? null) : null;
+      const ref = ultimaActMap[c.id] ?? null;
+      const diasTranscurridos = ref
+        ? Math.floor((hoy.getTime() - new Date(ref).getTime()) / 86400000)
+        : null;
+      const diasRestantes = plazo !== null && diasTranscurridos !== null
+        ? plazo - diasTranscurridos : null;
+
+      let estado: "ok" | "alerta" | "vencido" | "sin_plazo" = "sin_plazo";
+      if (diasRestantes !== null) {
+        if (diasRestantes < 0) estado = "vencido";
+        else if (diasRestantes <= 3) estado = "alerta";
+        else estado = "ok";
+      }
+
+      return { ...c, plazo, diasTranscurridos, diasRestantes, estado };
+    })
+    .sort((a, b) => {
+      const order = { vencido: 0, alerta: 1, ok: 2, sin_plazo: 3 };
+      return order[a.estado] - order[b.estado];
+    });
+
+  const vencidos = rows.filter(r => r.estado === "vencido").length;
+  const alertas  = rows.filter(r => r.estado === "alerta").length;
+
+  const badgeEstado = (estado: string, diasRestantes: number | null) => {
+    if (estado === "vencido") return <span className="font-body text-[10px] px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">Vencido {Math.abs(diasRestantes ?? 0)}d</span>;
+    if (estado === "alerta")  return <span className="font-body text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">Vence en {diasRestantes}d</span>;
+    if (estado === "ok")      return <span className="font-body text-[10px] px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-medium">En plazo ({diasRestantes}d)</span>;
+    return <span className="font-body text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground">Sin plazo configurado</span>;
+  };
+
+  return (
+    <>
+      <SectionHeader title="Mis Términos" description="Estado procesal de tus casos activos según los plazos configurados" />
+
+      {(vencidos > 0 || alertas > 0) && (
+        <div className="flex gap-3 mb-6 flex-wrap">
+          {vencidos > 0 && (
+            <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-red-50 border border-red-200">
+              <AlertTriangle className="w-4 h-4 text-red-600" />
+              <span className="font-body text-sm text-red-700 font-medium">{vencidos} caso{vencidos > 1 ? "s" : ""} vencido{vencidos > 1 ? "s" : ""}</span>
+            </div>
+          )}
+          {alertas > 0 && (
+            <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-50 border border-amber-200">
+              <Clock className="w-4 h-4 text-amber-600" />
+              <span className="font-body text-sm text-amber-700 font-medium">{alertas} caso{alertas > 1 ? "s" : ""} por vencer</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {rows.length === 0 ? (
+        <div className="bg-card rounded-xl border border-border p-12 text-center">
+          <CheckCircle2 className="w-10 h-10 text-accent mx-auto mb-3" />
+          <p className="font-display text-base font-semibold text-foreground">Sin casos activos</p>
+        </div>
+      ) : (
+        <div className="grid gap-3">
+          {rows.map(r => (
+            <div key={r.id} className={`bg-card rounded-xl border p-4 flex items-center gap-4 ${
+              r.estado === "vencido" ? "border-red-200 bg-red-50/30" :
+              r.estado === "alerta"  ? "border-amber-200 bg-amber-50/30" : "border-border"
+            }`}>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap mb-1">
+                  <p className="font-display text-sm font-semibold text-foreground">#{r.radicado}</p>
+                  {r.urgente && <span className="text-[10px] px-2 py-0.5 rounded-full bg-destructive/10 text-destructive font-body">URGENTE</span>}
+                  {badgeEstado(r.estado, r.diasRestantes)}
+                </div>
+                <p className="font-body text-xs text-muted-foreground">{r.cliente_nombre} · {r.tipo}</p>
+                <div className="flex items-center gap-3 mt-1 flex-wrap">
+                  <span className="font-body text-[10px] text-muted-foreground">Etapa: <span className="font-medium text-foreground">{r.etapa}</span></span>
+                  {r.plazo !== null && <span className="font-body text-[10px] text-muted-foreground">Plazo: <span className="font-medium text-foreground">{r.plazo}d</span></span>}
+                  {r.diasTranscurridos !== null && <span className="font-body text-[10px] text-muted-foreground">Transcurridos: <span className="font-medium text-foreground">{r.diasTranscurridos}d</span></span>}
+                </div>
+              </div>
+              <Button size="sm" variant="outline" onClick={() => onOpenCase(r.id)} className="flex-shrink-0 font-body text-xs">
+                Ver caso
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
+  );
 };
 
 const SeccionCasos = ({ casos, actuaciones, audiencias, documentos, loading, onChanged, userId, onOpenCase }: {
@@ -357,10 +511,20 @@ onOpenCase: (id: string) => void;
   );
 };
 
-const CaseDetail = ({ caso, actuaciones, audiencias, onBack, onChanged, userId }: {
+const CaseDetail = ({ caso, actuaciones, audiencias, onBack, onChanged, userId, terminosMap }: {
   caso: Caso; actuaciones: Actuacion[]; audiencias: Audiencia[];
   onBack: () => void; onChanged: () => void; userId: string;
+  terminosMap: Record<string, Record<string, number>>;
 }) => {
+  const plazoVigente = caso.area_id ? (terminosMap[caso.area_id]?.[caso.etapa] ?? null) : null;
+  const ultimaActFecha = actuaciones.length > 0
+    ? actuaciones.reduce((latest, a) => a.fecha > latest ? a.fecha : latest, actuaciones[0].fecha)
+    : null;
+  const diasTranscurridos = ultimaActFecha
+    ? Math.floor((new Date().getTime() - new Date(ultimaActFecha).getTime()) / 86400000)
+    : null;
+  const diasRestantes = plazoVigente !== null && diasTranscurridos !== null
+    ? plazoVigente - diasTranscurridos : null;
   const { toast } = useToast();
   const { user } = useAuth();
   const [comentarios, setComentarios] = useState<any[]>([]);
