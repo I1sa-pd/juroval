@@ -1445,7 +1445,7 @@ areasSet.add(t.area_id);
 
     setLoading(false);
   };
-  };
+
 
   useEffect(() => { load(); }, [limiteDias]);
 
@@ -1731,10 +1731,11 @@ const SeccionAbogados = () => {
       }
     }
 
-   const [{ data: tData }, { data: cases }, { data: acts }, { data: profs }] = await Promise.all([
+  const [{ data: roleRows }, { data: aData }] = await Promise.all([
       supabase.from("user_roles").select("user_id, role").in("role", ["abogado", "cliente"]),
       supabase.from("areas_derecho").select("id, nombre").order("nombre"),
-    
+    ]);
+
     setAreas(aData ?? []);
     const ids = (roleRows ?? []).map((r) => r.user_id);
     if (ids.length === 0) { setAbogados([]); setClientes([]); setLoading(false); return; }

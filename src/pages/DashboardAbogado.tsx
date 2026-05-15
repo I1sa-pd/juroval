@@ -139,9 +139,15 @@ const [terminosMap, setTerminosMap] = useState<Record<string, Record<string, num
   setNotificaciones((notifs ?? []) as any);
 
   // ── Notificaciones automáticas por términos próximos a vencer
+    // ── Notificaciones automáticas por términos próximos a vencer
     const hoy = new Date();
     hoy.setHours(0, 0, 0, 0);
-    for (const act of (acts ?? []) as any[]) {
+    const todasLasActs = await supabase
+      .from("actuaciones")
+      .select("id, case_id, tipo, vence_at, cumplida")
+      .in("case_id", ids.length > 0 ? ids : [""])
+      .eq("cumplida", false);
+    for (const act of (todasLasActs.data ?? []) as any[]) {
       if (!act.vence_at || act.cumplida) continue;
       const vence = new Date(act.vence_at);
       vence.setHours(0, 0, 0, 0);
