@@ -38,10 +38,15 @@ export const Route = createRootRoute({
       { name: "twitter:card", content: "summary" },
       { name: "twitter:site", content: "@Lovable" },
     ],
-    links: [
+   links: [
       {
         rel: "stylesheet",
         href: appCss,
+      },
+      {
+        rel: "icon",
+        href: "/favicon.png",
+        type: "image/png",
       },
     ],
   }),

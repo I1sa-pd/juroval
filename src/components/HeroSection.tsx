@@ -72,7 +72,8 @@ const HeroSection = () => {
             >
               Acceder al Sistema
             </button>
-          </div>
+            button
+           </div>
 
           <div className="mt-20 grid grid-cols-2 md:grid-cols-4 gap-8 max-w-3xl mx-auto">
             {[
