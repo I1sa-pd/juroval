@@ -123,7 +123,7 @@ const Login = () => {
 
           <p className="font-body text-xs text-muted-foreground text-center mt-6">
             ¿Olvidaste tu contraseña?{" "}
-            <span className="text-accent underline cursor-pointer">Recuperar acceso</span>
+            <span className="text-accent underline cursor-pointer" onClick={() => navigate("/forgot-password")}>Recuperar acceso</span>
           </p>
         </div>
       </div>
